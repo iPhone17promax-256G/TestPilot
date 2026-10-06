@@ -1,0 +1,4 @@
+services:
+  executor:
+    # 仅选择 Android 组件时挂载，普通安装不要求宿主机具备 KVM。
+    devices: [/dev/kvm:/dev/kvm]

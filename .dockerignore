@@ -1,0 +1,15 @@
+web/node_modules
+web/src
+.runtime
+.client
+deploy/*.env
+.env
+.env.*
+!.env.example
+.git
+.venv
+**/*.egg-info
+**/__pycache__
+**/*.tsbuildinfo
+
+releases/

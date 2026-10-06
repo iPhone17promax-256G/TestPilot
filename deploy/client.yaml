@@ -1,0 +1,70 @@
+name: aiqa-client
+services:
+  executor:
+    image: aiqa-runtime:0.1
+    command:
+    - python
+    - -m
+    - aiqa.local_executor
+    env_file:
+    - path: ../.client/execution.env
+      required: false
+    environment:
+      AIQA_ROLE: gateway
+      AIQA_PLATFORM_URL: ${AIQA_CLIENT_PLATFORM_URL:-http://api:8020}
+      AIQA_CLIENT_ORIGIN: ${AIQA_CLIENT_ORIGIN:-http://127.0.0.1:8020}
+      AIQA_CLIENT_BIND: 0.0.0.0
+      AIQA_CLIENT_ROOT: /client
+      AIQA_CLIENT_HOST_ROOT: ${AIQA_CLIENT_HOST_ROOT}
+      AIQA_DATABASE_URL: sqlite:////client/gateway.sqlite
+      AIQA_DATA: /client/scratch
+      PYTHONPATH: /app/src
+      BROWSER_USE_LOGGING_LEVEL: warning
+    volumes:
+    - ../.client:/client
+    - ../src:/app/src:ro
+    - ../skills:/app/skills:ro
+    - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+    - 127.0.0.1:8021:8021
+    extra_hosts:
+    - host.docker.internal:host-gateway
+    networks:
+    - outbound
+    - targets
+    - platform
+    shm_size: 512mb
+    restart: unless-stopped
+  appium:
+    labels:
+      aiqa.component: app
+    profiles:
+    - android
+    image: aiqa-appium:0.1
+    entrypoint: /opt/start-appium.sh
+    volumes:
+    - android:/root/.android/avd
+    - ../.client/apks:/client/apks:ro
+    devices:
+    - /dev/kvm:/dev/kvm
+    networks:
+    - targets
+    ports:
+    - 127.0.0.1:4725:4723
+    mem_limit: 4g
+    cpus: 2
+    shm_size: 512mb
+    restart: unless-stopped
+    container_name: aiqa-appium-1
+networks:
+  outbound: null
+  targets:
+    external: true
+    name: aiqa-targets
+  platform:
+    external: true
+    name: aiqa-entry
+volumes:
+  android:
+    external: true
+    name: aiqa_android

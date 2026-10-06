@@ -1,0 +1,16 @@
+{
+  "format": "真实已完成任务的静态页面截图",
+  "recordedAt": "2026-10-07",
+  "taskDate": "2026-10-06",
+  "api": {
+    "task": "TASK-975F7A4F8A11",
+    "image": "agent-api-workflow.png",
+    "view": "Agent 展开 runs_get 的真实返回结果"
+  },
+  "web": {
+    "task": "TASK-8AA232ACC9CA",
+    "note": "后续对话包含用户提供的定位线索；不宣称无人干预完成定位修复",
+    "image": "agent-web-workflow.png",
+    "view": "最终通过的 Web 测试运行报告"
+  }
+}

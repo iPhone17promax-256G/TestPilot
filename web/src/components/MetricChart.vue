@@ -1,0 +1,12 @@
+<script setup lang="ts">
+import {computed,ref} from 'vue'
+const props=defineProps<{title:string;unit:string;color:string;points:{second:number;value:number}[]}>()
+const hover=ref(-1),start=computed(()=>props.points[0]?.second||0),end=computed(()=>props.points.at(-1)?.second||0),max=computed(()=>{const peak=Math.max(1,...props.points.map(p=>p.value));return props.unit==='用户'?Math.ceil(peak):peak*1.12})
+const ticks=computed(()=>props.unit==='用户'?[...new Set([0,Math.ceil(max.value/2),max.value])]:[0,max.value/2,max.value])
+function x(second:number){return end.value===start.value?335:50+(second-start.value)/(end.value-start.value)*570}
+function y(value:number){return 135-value/max.value*108}
+const line=computed(()=>props.points.map(p=>x(p.second)+','+y(p.value)).join(' ')),current=computed(()=>props.points[hover.value])
+function inspect(e:PointerEvent){const r=(e.currentTarget as SVGElement).getBoundingClientRect(),position=(e.clientX-r.left)/r.width*650;hover.value=props.points.reduce((best,p,index)=>Math.abs(x(p.second)-position)<Math.abs(x(props.points[best]?.second||0)-position)?index:best,0)}
+function navigate(delta:number){hover.value=Math.min(props.points.length-1,Math.max(0,hover.value+delta))}
+</script>
+<template><section class="metric-chart"><div class="section-heading"><strong>{{title}} <span class="muted">{{unit}}</span></strong><span v-if="current" class="chart-value">{{current.second}} 秒 · {{Number(current.value.toFixed(2))}} {{unit}}</span></div><div v-if="!points.length" class="compact-empty">暂无时间序列数据</div><template v-else><svg viewBox="0 0 650 170" tabindex="0" role="img" :aria-label="title+'随时间变化，单位 '+unit+'，左右方向键查看采样点'" @pointermove="inspect" @pointerleave="hover=-1" @keydown.left.prevent="navigate(-1)" @keydown.right.prevent="navigate(1)"><g v-for="tick in ticks" :key="tick"><line x1="50" x2="620" :y1="y(tick)" :y2="y(tick)" stroke="#e5e7eb"/><text x="4" :y="y(tick)+4">{{Number(tick.toFixed(1))}}</text></g><polyline v-if="points.length>1" :points="line" fill="none" :stroke="color" stroke-width="2.5"/><circle v-else :cx="x(points[0]!.second)" :cy="y(points[0]!.value)" r="4" :fill="color"/><g v-if="current"><line :x1="x(current.second)" :x2="x(current.second)" y1="20" y2="135" stroke="#8c98a6" stroke-dasharray="4 4"/><circle :cx="x(current.second)" :cy="y(current.value)" r="4" :fill="color"/></g><text x="50" y="160">{{start}} 秒</text><text x="575" y="160">{{end}} 秒</text></svg><p v-if="points.length===1" class="form-hint">只有一个采样时间点，暂无法展示变化趋势。</p></template></section></template>

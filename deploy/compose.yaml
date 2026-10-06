@@ -1,0 +1,91 @@
+name: aiqa
+x-logging: &bounded-logs
+  driver: json-file
+  options: {max-size: 10m, max-file: "3"}
+services:
+  mysql:
+    logging: *bounded-logs
+    restart: unless-stopped
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: aiqa
+      MYSQL_USER: aiqa
+      MYSQL_PASSWORD: ${AIQA_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${AIQA_DB_ROOT_PASSWORD}
+    volumes:
+    - database:/var/lib/mysql
+    networks:
+    - management
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - MYSQL_PWD=$$MYSQL_PASSWORD mysql -h 127.0.0.1 -u aiqa aiqa -e 'SELECT 1' >/dev/null
+      interval: 3s
+      retries: 30
+  api:
+    logging: *bounded-logs
+    image: aiqa-runtime:0.1
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    env_file: platform.env
+    environment:
+      AIQA_DATA: /data
+      PYTHONPATH: /app/src
+      AIQA_ROLE: platform
+      AIQA_MODEL_KEY: ''
+    volumes:
+    - ../.runtime:/data
+    - ../src:/app/src:ro
+    - ../skills:/app/skills:ro
+    - ../web/dist:/app/web/dist:ro
+    ports:
+    - 127.0.0.1:8020:8020
+    networks:
+    - management
+    - entry
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+  executor:
+    logging: *bounded-logs
+    image: aiqa-runtime:0.1
+    command: [python, -m, aiqa.local_executor]
+    env_file:
+    - path: ../.client/execution.env
+      required: false
+    - runtime.env
+    environment:
+      AIQA_ROLE: gateway
+      AIQA_PLATFORM_URL: http://api:8020
+      AIQA_CLIENT_BIND: 0.0.0.0
+      AIQA_CLIENT_ROOT: /client
+      AIQA_CLIENT_HOST_ROOT: ${AIQA_CLIENT_HOST_ROOT}
+      AIQA_DATA: /client/scratch
+      AIQA_DATABASE_URL: sqlite:////client/gateway.sqlite
+      PYTHONPATH: /app/src
+      BROWSER_USE_LOGGING_LEVEL: warning
+    volumes:
+    - ../.client:/client
+    - ../src:/app/src:ro
+    - ../skills:/app/skills:ro
+    - /var/run/docker.sock:/var/run/docker.sock
+    networks: [entry, targets, outbound]
+    extra_hosts: [host.docker.internal:host-gateway]
+    shm_size: 512mb
+    mem_limit: 4g
+    cpus: 3
+    restart: unless-stopped
+    depends_on: [api]
+networks:
+  management: null
+  targets:
+    name: aiqa-targets
+    internal: true
+  entry:
+    name: aiqa-entry
+  outbound: null
+volumes:
+  database: null
+  android: null

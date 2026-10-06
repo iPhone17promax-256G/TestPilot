@@ -1,0 +1,82 @@
+# 这是成品安装配置，没有 build 或源码挂载；两个模式共用同一执行协议。
+x-logging: &bounded-logs
+  driver: json-file
+  options: {max-size: 10m, max-file: "3"}
+services:
+  mysql:
+    logging: *bounded-logs
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: aiqa
+      MYSQL_USER: aiqa
+      MYSQL_PASSWORD: ${AIQA_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${AIQA_DB_ROOT_PASSWORD}
+    volumes: [database:/var/lib/mysql]
+    networks: [management]
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, "MYSQL_PWD=$$MYSQL_PASSWORD mysql -h 127.0.0.1 -u aiqa aiqa -e 'SELECT 1' >/dev/null"]
+      interval: 3s
+      retries: 40
+  api:
+    logging: *bounded-logs
+    image: ${AIQA_RELEASE_IMAGE}
+    env_file: api.env
+    environment:
+      AIQA_ROLE: platform
+      AIQA_DATA: /data
+      AIQA_MODEL_KEY: ''
+    volumes: [./data:/data]
+    ports: ["${AIQA_BIND}:${AIQA_PORT}:8020"]
+    networks: [management, entry]
+    depends_on:
+      mysql: {condition: service_healthy}
+    restart: unless-stopped
+    mem_limit: 1g
+  executor:
+    logging: *bounded-logs
+    image: ${AIQA_RELEASE_IMAGE}
+    command: [python, -m, aiqa.local_executor]
+    env_file:
+    - path: test.env
+      required: false
+    - executor.env
+    environment:
+      AIQA_ROLE: gateway
+      AIQA_PLATFORM_URL: http://api:8020
+      AIQA_CLIENT_BIND: 0.0.0.0
+      AIQA_CLIENT_ROOT: /client
+      AIQA_CLIENT_HOST_ROOT: ${AIQA_INSTALL_PATH}/client
+      AIQA_DATABASE_URL: sqlite:////client/gateway.sqlite
+      AIQA_DATA: /client/scratch
+      BROWSER_USE_LOGGING_LEVEL: warning
+    # 只有执行服务持有 Docker socket，API 和每个测试容器均不挂载。
+    volumes: [./client:/client, /var/run/docker.sock:/var/run/docker.sock]
+    extra_hosts: [host.docker.internal:host-gateway]
+    networks: [entry, targets]
+    shm_size: 512mb
+    mem_limit: 4g
+    cpus: 3
+    depends_on: [api]
+    restart: unless-stopped
+  appium:
+    logging: *bounded-logs
+    profiles: [android]
+    image: ${AIQA_APPIUM_IMAGE}
+    container_name: ${COMPOSE_PROJECT_NAME}-appium-1
+    entrypoint: /opt/start-appium.sh
+    devices: [/dev/kvm:/dev/kvm]
+    volumes: [android:/root/.android/avd, ./client/apks:/client/apks:ro]
+    networks: [targets]
+    labels: {aiqa.component: app}
+    shm_size: 512mb
+    mem_limit: 4g
+    cpus: 2
+    restart: unless-stopped
+networks:
+  management: {internal: true}
+  entry: {}
+  targets: {name: "${AIQA_TARGET_NETWORK}"}
+volumes:
+  database: {}
+  android: {}

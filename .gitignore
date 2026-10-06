@@ -1,0 +1,24 @@
+node_modules/
+*.tsbuildinfo
+dist/
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+playwright-report/
+test-results/
+.runtime/
+*.egg-info/
+build/
+.coverage
+htmlcov/
+
+.client/
+deploy/platform.env
+deploy/runtime.env
+releases/
+
+# 个人学习与面试讲解文档，仅本地保留
+docs/

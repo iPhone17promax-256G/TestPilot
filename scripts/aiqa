@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+AIQA_EXEC_ARGS=(-i)
+if [[ -n "${AIQA_PROJECT_ID:-}" ]]; then AIQA_EXEC_ARGS+=(-e AIQA_PROJECT_ID); fi
+if [[ -n "${AIQA_ACCESS_TOKEN:-}" ]]; then AIQA_EXEC_ARGS+=(-e AIQA_ACCESS_TOKEN); fi
+exec docker exec "${AIQA_EXEC_ARGS[@]}" aiqa-api-1 aiqa "$@"

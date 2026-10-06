@@ -1,0 +1,8 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import { Smartphone, Gauge, Sparkles, FlaskConical, Play, FolderOpen, Settings2, ChevronDown, ChevronRight, Plus, ArrowUpRight, ArrowUp, ArrowLeft, Search, Check, CheckCheck, X, CircleCheck, CircleX, LoaderCircle, Circle, Clock3, Globe2, Monitor, FileText, Code2, Terminal, BookOpen, ExternalLink, Copy, PanelLeftClose, Menu, Info, Pause, Save, RotateCcw, Eye, GitBranch, SlidersHorizontal, Image, FileCode2, ShieldCheck, ArrowRight, Link2, Trash2, MoreHorizontal } from '@lucide/vue'
+const props = withDefaults(defineProps<{ name: string; size?: number }>(), { size: 18 })
+const icons: Record<string, unknown> = { app: Smartphone, performance: Gauge, sparkles: Sparkles, cases: FlaskConical, play: Play, projects: FolderOpen, settings: Settings2, down: ChevronDown, chevron: ChevronRight, plus: Plus, external: ArrowUpRight, send: ArrowUp, back: ArrowLeft, search: Search, check: Check, checks: CheckCheck, close: X, passed: CircleCheck, failed: CircleX, running: LoaderCircle, circle: Circle, clock: Clock3, api: Globe2, web: Monitor, file: FileText, code: Code2, terminal: Terminal, book: BookOpen, link: ExternalLink, copy: Copy, collapse: PanelLeftClose, menu: Menu, info: Info, pause: Pause, save: Save, reset: RotateCcw, eye: Eye, branch: GitBranch, filters: SlidersHorizontal, image: Image, filecode: FileCode2, shield: ShieldCheck, arrow: ArrowRight, chain: Link2, trash: Trash2, more: MoreHorizontal, browser: Monitor }
+const icon = computed(() => icons[props.name] ?? Circle)
+</script>
+<template><component :is="icon" :size="size" :stroke-width="1.7" aria-hidden="true" class="icon" :class="{ spinning: name === 'running' }" /></template>

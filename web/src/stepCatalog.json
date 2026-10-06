@@ -1,0 +1,338 @@
+{
+  "api": [
+    {
+      "action": "request",
+      "label": "发送 HTTP 请求"
+    },
+    {
+      "action": "extract",
+      "label": "提取变量"
+    },
+    {
+      "action": "assert",
+      "label": "检查响应"
+    },
+    {
+      "action": "set_variable",
+      "label": "设置变量"
+    },
+    {
+      "action": "sleep",
+      "label": "固定暂停"
+    },
+    {
+      "action": "python",
+      "label": "Python 自定义步骤"
+    },
+    {
+      "action": "if",
+      "label": "条件分支"
+    },
+    {
+      "action": "else",
+      "label": "否则分支"
+    },
+    {
+      "action": "repeat",
+      "label": "重复执行"
+    },
+    {
+      "action": "foreach",
+      "label": "遍历数据"
+    },
+    {
+      "action": "end",
+      "label": "结束控制块"
+    }
+  ],
+  "web": [
+    {
+      "action": "extract",
+      "label": "提取变量"
+    },
+    {
+      "action": "goto",
+      "label": "打开页面"
+    },
+    {
+      "action": "click",
+      "label": "点击元素"
+    },
+    {
+      "action": "dblclick",
+      "label": "双击元素"
+    },
+    {
+      "action": "hover",
+      "label": "悬停元素"
+    },
+    {
+      "action": "fill",
+      "label": "输入内容"
+    },
+    {
+      "action": "press",
+      "label": "按键"
+    },
+    {
+      "action": "select",
+      "label": "选择选项"
+    },
+    {
+      "action": "check",
+      "label": "勾选"
+    },
+    {
+      "action": "uncheck",
+      "label": "取消勾选"
+    },
+    {
+      "action": "wait",
+      "label": "等待元素状态"
+    },
+    {
+      "action": "assert_visible",
+      "label": "检查可见状态"
+    },
+    {
+      "action": "assert_text",
+      "label": "检查元素文字"
+    },
+    {
+      "action": "assert_url",
+      "label": "检查页面地址"
+    },
+    {
+      "action": "assert_enabled",
+      "label": "检查可用状态"
+    },
+    {
+      "action": "assert_value",
+      "label": "检查输入框值"
+    },
+    {
+      "action": "assert_attribute",
+      "label": "检查元素属性"
+    },
+    {
+      "action": "assert_count",
+      "label": "检查元素数量"
+    },
+    {
+      "action": "assert_checked",
+      "label": "检查勾选状态"
+    },
+    {
+      "action": "upload",
+      "label": "上传辅助文件"
+    },
+    {
+      "action": "screenshot",
+      "label": "保存截图"
+    },
+    {
+      "action": "dialog",
+      "label": "处理下一个弹窗"
+    },
+    {
+      "action": "back",
+      "label": "返回"
+    },
+    {
+      "action": "set_variable",
+      "label": "设置变量"
+    },
+    {
+      "action": "sleep",
+      "label": "固定暂停"
+    },
+    {
+      "action": "python",
+      "label": "Python 自定义步骤"
+    },
+    {
+      "action": "if",
+      "label": "条件分支"
+    },
+    {
+      "action": "else",
+      "label": "否则分支"
+    },
+    {
+      "action": "repeat",
+      "label": "重复执行"
+    },
+    {
+      "action": "foreach",
+      "label": "遍历数据"
+    },
+    {
+      "action": "end",
+      "label": "结束控制块"
+    },
+    {
+      "action": "open_tab",
+      "label": "打开新标签页"
+    },
+    {
+      "action": "switch_tab",
+      "label": "切换标签页"
+    },
+    {
+      "action": "close_tab",
+      "label": "关闭标签页"
+    },
+    {
+      "action": "click_popup",
+      "label": "点击并接管新标签页"
+    },
+    {
+      "action": "download",
+      "label": "点击并下载文件"
+    },
+    {
+      "action": "reload",
+      "label": "刷新页面"
+    },
+    {
+      "action": "scroll",
+      "label": "滚动至元素"
+    },
+    {
+      "action": "drag",
+      "label": "拖拽元素"
+    }
+  ],
+  "app": [
+    {
+      "action": "extract",
+      "label": "提取变量"
+    },
+    {
+      "action": "click",
+      "label": "点击元素"
+    },
+    {
+      "action": "fill",
+      "label": "输入内容"
+    },
+    {
+      "action": "press",
+      "label": "按键"
+    },
+    {
+      "action": "check",
+      "label": "勾选"
+    },
+    {
+      "action": "uncheck",
+      "label": "取消勾选"
+    },
+    {
+      "action": "wait",
+      "label": "等待元素状态"
+    },
+    {
+      "action": "assert_visible",
+      "label": "检查可见状态"
+    },
+    {
+      "action": "assert_text",
+      "label": "检查元素文字"
+    },
+    {
+      "action": "assert_enabled",
+      "label": "检查可用状态"
+    },
+    {
+      "action": "assert_attribute",
+      "label": "检查元素属性"
+    },
+    {
+      "action": "assert_checked",
+      "label": "检查勾选状态"
+    },
+    {
+      "action": "screenshot",
+      "label": "保存截图"
+    },
+    {
+      "action": "back",
+      "label": "返回"
+    },
+    {
+      "action": "swipe",
+      "label": "滑动"
+    },
+    {
+      "action": "set_variable",
+      "label": "设置变量"
+    },
+    {
+      "action": "sleep",
+      "label": "固定暂停"
+    },
+    {
+      "action": "python",
+      "label": "Python 自定义步骤"
+    },
+    {
+      "action": "if",
+      "label": "条件分支"
+    },
+    {
+      "action": "else",
+      "label": "否则分支"
+    },
+    {
+      "action": "repeat",
+      "label": "重复执行"
+    },
+    {
+      "action": "foreach",
+      "label": "遍历数据"
+    },
+    {
+      "action": "end",
+      "label": "结束控制块"
+    },
+    {
+      "action": "clear",
+      "label": "清空输入"
+    }
+  ],
+  "performance": [
+    {
+      "action": "request",
+      "label": "发送 HTTP 请求"
+    },
+    {
+      "action": "if",
+      "label": "条件分支"
+    },
+    {
+      "action": "else",
+      "label": "否则分支"
+    },
+    {
+      "action": "repeat",
+      "label": "重复执行"
+    },
+    {
+      "action": "end",
+      "label": "结束控制块"
+    },
+    {
+      "action": "csv",
+      "label": "CSV 数据源"
+    },
+    {
+      "action": "once",
+      "label": "每用户仅执行一次"
+    },
+    {
+      "action": "transaction",
+      "label": "事务统计"
+    }
+  ]
+}
