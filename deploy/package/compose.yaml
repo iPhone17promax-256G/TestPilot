@@ -100,7 +100,7 @@ services:
     networks: [entry, targets]
     shm_size: 512mb
     mem_limit: 4g
-    cpus: 3
+    cpus: ${TESTPILOT_EXECUTOR_CPUS:-2}
     depends_on: [api]
     restart: unless-stopped
   appium:

@@ -34,6 +34,14 @@ if args and args[0] == 'run' and '/install/generate_config.py' in args:
             key, value = args[index + 1].split('=', 1)
             environment[key] = value
     raise SystemExit(subprocess.run([sys.executable, 'generate_config.py'], env=environment).returncode)
+if args and args[0] == 'compose' and args[-1] == 'stop':
+    if '--env-file' not in args:
+        raise SystemExit(11)
+    configuration = Path(args[args.index('--env-file') + 1])
+    if 'TESTPILOT_TLS_DIR=' not in configuration.read_text():
+        raise SystemExit(12)
+    if 'deploy/client.yaml' in args and os.environ.get('TESTPILOT_FAKE_STOP_FAIL'):
+        raise SystemExit(7)
 raise SystemExit(0)
 '''
 
@@ -73,6 +81,35 @@ class ReleasePackageTests(unittest.TestCase):
                 value = line.split("image: ", 1)[1]
                 if "${" not in value:
                     self.assertIn(value, images)
+
+    def test_stop_loads_tls_configuration_and_attempts_both_groups(self):
+        project = self.root / 'stop-project'
+        (project / 'scripts').mkdir(parents=True)
+        (project / 'deploy').mkdir()
+        shutil.copy2(ROOT / 'scripts/stop.sh', project / 'scripts/stop.sh')
+        configuration = project / 'deploy/platform.env'
+        for configured, client_failure in [(False, False), (True, False), (True, True)]:
+            with self.subTest(configured=configured, client_failure=client_failure):
+                self.log.unlink(missing_ok=True)
+                if configured:
+                    configuration.write_text('TESTPILOT_TLS_DIR=/tmp/testpilot-test-tls\n')
+                else:
+                    configuration.unlink(missing_ok=True)
+                env = dict(self.environment)
+                env.pop('TESTPILOT_TLS_DIR', None)
+                if client_failure:
+                    env['TESTPILOT_FAKE_STOP_FAIL'] = '1'
+                result = subprocess.run(['bash', 'scripts/stop.sh'], cwd=project, env=env,
+                                        capture_output=True, text=True, timeout=10)
+                commands = self.commands()
+                self.assertEqual(result.returncode, 7 if client_failure else 0)
+                if not configured:
+                    self.assertEqual(commands, [])
+                    continue
+                self.assertEqual(len(commands), 2)
+                self.assertTrue(all(command[:3] == ['compose', '--env-file', 'deploy/platform.env'] for command in commands))
+                self.assertIn('deploy/client.yaml', commands[0])
+                self.assertIn('deploy/compose.yaml', commands[1])
 
     def test_optional_images_join_the_same_preflight_manifest(self):
         images = release.required_images(release.image_defaults(), performance=True, android=True)

@@ -43,7 +43,7 @@ async def lifespan(app):
     finally:close_dispatcher()
 
 
-app = FastAPI(title="TestPilot", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="TestPilot", version="0.2.0", lifespan=lifespan)
 
 
 from . import authentication as accounts

@@ -78,7 +78,7 @@ flowchart LR
 
 ### 从源码启动
 
-准备 Linux，或 Windows + Ubuntu WSL；安装 Docker Engine/Compose、Node.js 22.6+ 和宿主机 Python 3。运行时的 Python 3.12、测试依赖与 Chromium 随 Docker 镜像构建。
+准备 Linux，或 Windows + Ubuntu WSL；安装 Docker Engine/Compose、Node.js 22.6+ 和宿主机 Python 3。Docker 至少分配 2 核 CPU，建议 6 GB 以上内存。运行时的 Python 3.12、测试依赖与 Chromium 随 Docker 镜像构建。
 
 获取源码并进入仓库目录：
 
@@ -236,7 +236,7 @@ bash scripts/stop.sh
 
 检查脚本需要运行中的 MySQL、Redis 和已构建的测试镜像。后端检查使用独立临时数据库、随机 Redis 键前缀和临时文件目录，结束后清理，不调用真实模型。GitHub Actions 也会执行前端检查与隔离后端回归；实际结果见仓库 Actions 页面。API、Web UI、JMeter 单用户验证、Android APP 与外部 MCP 的真实演示和业务验收需要另外准备对应环境。
 
-0.2.0 发布前本地验收：**303 项后端测试、15 项前端测试、生产构建与发布镜像构建通过，前端依赖审计 0 漏洞**。
+0.2.0 发布前本地验收：**304 项后端测试、15 项前端测试、生产构建与发布镜像构建通过，前端依赖审计 0 漏洞**。
 
 提交问题时，请提供部署模式、操作步骤、实际结果、预期结果和相关 Task/Run ID；提交改动时说明验证方式。不要上传 API Key、密码、访问令牌或包含敏感信息的截图和 Trace。
 
