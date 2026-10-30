@@ -12,8 +12,8 @@ def test_text_and_checkbox(driver):
     wait = open_controls(driver)
     edit = wait.until(EC.visibility_of_element_located((AppiumBy.ID, "io.appium.android.apis:id/edit")))
     edit.clear()
-    edit.send_keys("AIQA demo")
-    assert edit.text == "AIQA demo"
+    edit.send_keys("TestPilot demo")
+    assert edit.text == "TestPilot demo"
     checkbox = driver.find_element(AppiumBy.ID, "io.appium.android.apis:id/check1")
     assert checkbox.get_attribute("checked") == "false"
     checkbox.click()

@@ -1,6 +1,6 @@
 from collections import namedtuple
 import pytest
-from aiqa.runners import container
+from testpilot.runners import container
 
 
 def test_output_budget_counts_nested_files_and_rejects_excess(tmp_path):
@@ -56,7 +56,7 @@ def test_symlinks_are_not_followed_or_packaged_and_targets_survive(tmp_path):
 ])
 def test_cleanup_recovers_expired_auxiliary_and_test_containers(monkeypatch,workspace,status,deadline,removed):
     class Execution:
-        labels={'aiqa.workspace':workspace,'aiqa.execution.deadline':deadline}
+        labels={'testpilot.workspace':workspace,'testpilot.execution.deadline':deadline}
         deleted=False
         def remove(self,force=False):
             assert force
@@ -64,7 +64,7 @@ def test_cleanup_recovers_expired_auxiliary_and_test_containers(monkeypatch,work
     execution=Execution()
     class Containers:
         def list(self,filters):
-            assert filters=={'label':'aiqa.execution=true'}
+            assert filters=={'label':'testpilot.execution=true'}
             return [execution]
     class Client:
         containers=Containers()

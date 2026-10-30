@@ -2,7 +2,14 @@ web/node_modules
 web/src
 .runtime
 .client
+.tls
 deploy/*.env
+deploy/package/*.env
+deploy/package/data
+deploy/package/client
+deploy/package/tls
+deploy/package/images.tar.gz
+deploy/package/images.sha256
 .env
 .env.*
 !.env.example
@@ -13,3 +20,4 @@ deploy/*.env
 **/*.tsbuildinfo
 
 releases/
+docs/

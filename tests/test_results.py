@@ -1,4 +1,4 @@
-from aiqa.runners.container import classify
+from testpilot.runners.container import classify
 
 
 def test_zero_collected_is_not_passed():

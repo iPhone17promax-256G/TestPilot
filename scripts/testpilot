@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+TESTPILOT_EXEC_ARGS=(-i)
+if [[ -n "${TESTPILOT_PROJECT_ID:-}" ]]; then TESTPILOT_EXEC_ARGS+=(-e TESTPILOT_PROJECT_ID); fi
+if [[ -n "${TESTPILOT_ACCESS_TOKEN:-}" ]]; then TESTPILOT_EXEC_ARGS+=(-e TESTPILOT_ACCESS_TOKEN); fi
+exec docker exec "${TESTPILOT_EXEC_ARGS[@]}" testpilot-api-1 testpilot "$@"

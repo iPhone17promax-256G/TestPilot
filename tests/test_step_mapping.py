@@ -2,9 +2,9 @@ import json
 import xml.etree.ElementTree as ET
 import httpx
 import pytest
-from aiqa.steps import compile_steps_details, validate_steps
-from aiqa.runners import visual_runtime as runtime
-from aiqa.runners.steps import assertion
+from testpilot.steps import compile_steps_details, validate_steps
+from testpilot.runners import visual_runtime as runtime
+from testpilot.runners.steps import assertion
 
 def execute(kind, steps, **fixtures):
     normalized, source, mapping=compile_steps_details(kind,steps)
@@ -107,12 +107,12 @@ def test_jmeter_mapping_preserves_params_form_timeout_redirects():
 
 def test_preview_pure_and_saved_source_matches():
     from fastapi.testclient import TestClient
-    from aiqa.api import app
-    from aiqa.config import settings
-    from aiqa.storage import session,Record
-    client=TestClient(app,headers={"Authorization":"Bearer "+settings.access_token})
+    from testpilot.api import app
+    from testpilot.config import settings
+    from testpilot.storage import session,Record
+    client=TestClient(app, base_url="https://testserver",headers={"Authorization":"Bearer "+settings.access_token})
     project=client.post("/api/projects",json={"name":"映射验证临时项目"}).json()["id"]
-    headers={"X-AIQA-Project":project}
+    headers={"X-TestPilot-Project":project}
     try:
         steps=[{"action":"set_variable","variable":"count","expected":2},{"action":"python","python":"assert rt.variables['count'] == 2"}]
         preview=client.post("/api/cases/preview",headers=headers,json={"kind":"api","steps":steps})
@@ -128,7 +128,7 @@ def test_preview_pure_and_saved_source_matches():
 
 def test_generated_web_wait_frame_upload_dialog(tmp_path,monkeypatch):
     from playwright.sync_api import sync_playwright
-    from aiqa.runners import steps as legacy
+    from testpilot.runners import steps as legacy
     report=tmp_path/"steps.json";original=runtime.StepRuntime
     monkeypatch.setattr(legacy,"StepRuntime",lambda *args,**kw:original(*args,report_path=str(report),**kw))
     (tmp_path/"sample.txt").write_text("sample")
@@ -187,7 +187,7 @@ def test_app_source_uses_platform_driver_and_wait_conditions():
 
 
 def test_python_skip_is_recorded_as_skipped_not_passed(tmp_path,monkeypatch):
-    from aiqa.runners import steps as legacy
+    from testpilot.runners import steps as legacy
     original=runtime.StepRuntime
     report=tmp_path/"steps.json"
     monkeypatch.setattr(legacy,"StepRuntime",lambda *args,**kw:original(*args,report_path=str(report),**kw))

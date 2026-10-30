@@ -2,6 +2,7 @@
 import {computed,ref,watch} from 'vue'
 import AppIcon from './AppIcon.vue'
 import AppModal from './AppModal.vue'
+import ProjectKnowledge from './ProjectKnowledge.vue'
 import type {ProjectSource} from '../types'
 import {state,request,refresh,notify,uploadProjectSource} from '../store'
 import {dateTime} from '../uiHelpers'
@@ -44,12 +45,14 @@ async function load(offset=0){
   if(project===state.projectId&&preview.value?.id===doc.id){content.value=offset?content.value+data.content:data.content;nextOffset.value=data.nextOffset}
  }catch(e){if(project===state.projectId&&preview.value?.id===doc.id)error.value=String(e)}finally{if(preview.value?.id===doc.id)loading.value=false}
 }
-function view(doc:ProjectSource){preview.value=doc;content.value='';nextOffset.value=null;error.value='';loading.value=false;if(doc.readable&&!doc.archived)void load()}
+function view(doc:ProjectSource,offset=0){preview.value=doc;content.value='';nextOffset.value=null;error.value='';loading.value=false;if(doc.readable&&!doc.archived)void load(offset)}
+function readHit(id:string,offset:number){const doc=state.sources.find(s=>s.id===id);if(doc)view(doc,offset)}
 </script>
 <template>
  <section class="panel project-materials">
   <div class="panel-heading"><h2><AppIcon name="file" :size="17"/>项目资料</h2><div class="material-actions"><button class="button secondary" @click="sourceOpen=true">新建文字资料</button><button class="button primary" :disabled="uploading" @click="input?.click()"><AppIcon name="plus" :size="15"/>{{uploading?'上传中…':'上传文件'}}</button><input ref="input" type="file" multiple hidden aria-label="上传项目文件" @change="upload"/></div></div>
   <p class="section-footnote">需求、接口说明与配套文件保存在当前项目，所有对话均可按需读取。对话附件仍只用于它所属的对话。</p>
+  <ProjectKnowledge @read="readHit"/>
   <div class="material-toolbar"><input v-model="query" aria-label="搜索项目资料" placeholder="搜索名称和简介"/><div class="local-tabs" role="tablist" aria-label="资料状态"><button role="tab" :aria-selected="!archived" :class="{active:!archived}" @click="archived=false">使用中 <span>{{activeCount}}</span></button><button role="tab" :aria-selected="archived" :class="{active:archived}" @click="archived=true">已归档 <span>{{state.sources.length-activeCount}}</span></button></div></div>
   <p v-if="progress" class="material-progress" role="status">{{progress}}</p>
   <div v-for="doc in documents" :key="doc.id" class="material-row">

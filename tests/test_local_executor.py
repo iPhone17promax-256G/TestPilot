@@ -1,11 +1,12 @@
 import copy
 import pytest
 from pydantic import ValidationError
-from aiqa.config import settings
-from aiqa.models import ModelProfile, model_metadata, request_body
-from aiqa.executors import merge, register, registry, profile, claim, commit, valid_relative, bundle
-from aiqa.storage import Record, Job, session, uid, read_record
-from aiqa.workspace import user_scope, project_scope
+from testpilot.config import settings
+from testpilot.models import ModelProfile, model_metadata, request_body
+from testpilot.executors import merge, register, registry, profile, claim, commit, valid_relative, bundle
+from testpilot.storage import Record, session, uid, read_record
+from testpilot.workspace import user_scope, project_scope
+from testpilot.job_queue import enqueue
 
 
 def test_reasoning_only_confirmed_metadata():
@@ -34,7 +35,7 @@ def test_platform_model_schema_rejects_keys_and_headers():
 
 
 def test_local_key_is_bound_to_endpoint(monkeypatch,tmp_path):
-    from aiqa.local_vault import LocalVault
+    from testpilot.local_vault import LocalVault
     monkeypatch.setattr(settings,"client_root",tmp_path)
     vault=LocalVault("USER-A");vault.keyring=None
     vault.put("MODEL-A","secret-demo-key","https://original.invalid/v1")
@@ -49,7 +50,7 @@ def test_local_key_is_bound_to_endpoint(monkeypatch,tmp_path):
 
 
 def test_device_session_and_local_action_are_account_scoped():
-    from aiqa.storage import list_records
+    from testpilot.storage import list_records
     owner=uid("USER");other=uid("USER")
     with user_scope(owner),session() as db:
         identities=[]
@@ -76,7 +77,7 @@ def test_account_cannot_claim_or_read_other_account():
     owner=uid("USER");other=uid("USER");identity=uid("TASK");model=uid("MODEL")
     with user_scope(owner),session() as db:
         db.add(Record(id=identity,kind="task",status="queued",payload=dict(id=identity,status="queued",ownerId=owner,executorId="",messages=[])))
-        db.add(Job(id=uid("JOB"),kind="agent",record_id=identity))
+        enqueue(db,db.get(Record,identity),"agent")
         db.add(Record(id=model,kind="model_profile",payload=dict(id=model,ownerId=owner)))
     with user_scope(other):
         executor=register("","test",{})
@@ -103,9 +104,9 @@ def test_file_paths_are_relative(path):
 
 def test_platform_cannot_run_agent(monkeypatch):
     monkeypatch.setattr(settings,"role","platform")
-    from aiqa.agent.runtime import execute_task
+    from testpilot.agent.runtime import execute_task
     with pytest.raises(PermissionError):execute_task("TASK-NOT-RUN")
-    from aiqa.worker import main
+    from testpilot.worker import main
     with pytest.raises(RuntimeError):main("agent")
 
 
@@ -114,13 +115,13 @@ def test_same_concurrent_change_is_not_a_conflict():
 
 
 def test_readonly_environment_does_not_request_permission():
-    from aiqa.agent.permissions import READ_TOOLS
+    from testpilot.agent.permissions import READ_TOOLS
     assert "environment_status" in READ_TOOLS
 
 
 def test_switching_models_keeps_message_order(monkeypatch):
-    from aiqa import models
-    from aiqa.testing import take_user_messages
+    from testpilot import models
+    from testpilot.testing import take_user_messages
     owner=uid("USER");identity=uid("TASK")
     messages=[dict(id=f"m{i}",role="user",content=str(i),modelProfileId=model,reasoningEffort="",delivered=False) for i,model in enumerate(["A","B","A"])]
     with user_scope(owner),session() as db:
@@ -133,7 +134,7 @@ def test_switching_models_keeps_message_order(monkeypatch):
 
 def test_appium_receives_only_apk_cache(monkeypatch,tmp_path):
     import hashlib
-    from aiqa import mobile
+    from testpilot import mobile
     source=tmp_path/"original.apk";source.write_bytes(b"apk-demo")
     monkeypatch.setattr(settings,"role","executor")
     monkeypatch.setattr(settings,"client_root",tmp_path/"local")
@@ -145,15 +146,16 @@ def test_appium_receives_only_apk_cache(monkeypatch,tmp_path):
     assert target.read_bytes()==b"apk-demo"
 
 
-def test_replica_replaces_locally_generated_job_id():
-    from aiqa.replica import apply_snapshot
-    from aiqa.storage import Base,Job
+def test_replica_keeps_job_facts_only_in_authorized_snapshot():
+    from testpilot.replica import apply_snapshot
+    from testpilot.storage import Base
     from sqlalchemy import create_engine, select
     from sqlalchemy.orm import Session
     engine=create_engine("sqlite://")
     Base.metadata.create_all(engine)
     with Session(engine) as db,db.begin():
-        db.add(Job(id="LOCAL",kind="test",record_id="RUN-TEST"));db.flush()
         apply_snapshot(db,dict(records=[],jobs=[dict(id="PLATFORM",kind="test",record_id="RUN-TEST",status="queued",claim="",lease=None)]))
-        assert [j.id for j in db.scalars(select(Job))]==["PLATFORM"]
+        assert db.info["jobs"][0]["id"]=="PLATFORM"
+        from sqlalchemy import inspect
+        assert "jobs" not in inspect(engine).get_table_names()
     engine.dispose()

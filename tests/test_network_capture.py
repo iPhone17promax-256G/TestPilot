@@ -5,6 +5,7 @@ import json
 import socket
 import ssl
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
@@ -14,12 +15,12 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from playwright.sync_api import sync_playwright
 from sqlalchemy import select
-from aiqa.network_capture import NetworkRecorder, atomic_json
-from aiqa.network import create_session, network_list, network_read, capture_set, task_policy, resolve_level, session_summary
-from aiqa.storage import Record, session, uid, update_record
-from aiqa.config import settings
-from aiqa.workspace import project_scope
-from aiqa.tools import dispatch
+from testpilot.network_capture import NetworkRecorder, atomic_json
+from testpilot.network import create_session, network_list, network_read, capture_set, task_policy, resolve_level, session_summary
+from testpilot.storage import Record, session, uid, update_record
+from testpilot.config import settings
+from testpilot.workspace import project_scope
+from testpilot.tools import dispatch
 
 
 class TargetHandler(BaseHTTPRequestHandler):
@@ -104,8 +105,8 @@ def test_http_https_capture_bodies_failures_and_context_isolation(target, tmp_pa
         page.evaluate("async () => {await fetch('/api/status');await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'demo'})});await fetch('/api/error');await fetch('/api/big');await fetch('/api/drop').catch(()=>{});}")
         page.wait_for_timeout(150)
         browser.close()
-        # Match pytest's teardown order: browser fixtures end before the
-        # reporting hook. A closed context must not break test reporting.
+        # 模拟 pytest 的真实清理顺序：浏览器 fixture 先结束，网络报告钩子随后收尾；
+        # 检查浏览器上下文已关闭时仍能写出网络索引和测试报告，不能让取消订阅的错误盖掉原测试结果。
         recorder.close()
     index = json.loads((tmp_path / "network/index.json").read_text())
     assert index["status"] == "completed"
@@ -133,7 +134,11 @@ def test_off_has_no_listener_and_detailed_keeps_resource_summaries(target, tmp_p
         page = context.new_page()
         page.goto(url)
         page.evaluate("async()=>{await fetch('/asset');await fetch('/api/big')}")
-        page.wait_for_timeout(100)
+        # fetch 返回响应头时正文可能还在传输；等待采集完成，避免机器繁忙时固定 100ms 过早关闭浏览器。
+        deadline=time.monotonic()+3
+        while recorder.pending and time.monotonic()<deadline:
+            page.wait_for_timeout(20)
+        assert not recorder.pending
         recorder.close()
         browser.close()
     index = json.loads((tmp_path / "network/index.json").read_text())
@@ -147,7 +152,7 @@ def test_off_has_no_listener_and_detailed_keeps_resource_summaries(target, tmp_p
 
 
 def test_capture_origin_and_request_count_limits(monkeypatch, tmp_path):
-    import aiqa.network_capture as capture
+    import testpilot.network_capture as capture
     monkeypatch.setattr(capture, "MAX_REQUESTS", 2)
     recorder = NetworkRecorder(tmp_path, "NET-TEST", "https://target.test")
     class Request:
@@ -170,7 +175,7 @@ def test_capture_origin_and_request_count_limits(monkeypatch, tmp_path):
 
 
 def test_storage_budget_includes_index_and_omission_is_explicit(monkeypatch, tmp_path):
-    import aiqa.network_capture as capture
+    import testpilot.network_capture as capture
     monkeypatch.setattr(capture, "MAX_DETAIL_BYTES", 1200)
     recorder = NetworkRecorder(tmp_path, "NET-TEST", "http://target.test")
     class Request:
@@ -188,6 +193,128 @@ def test_storage_budget_includes_index_and_omission_is_explicit(monkeypatch, tmp
     assert index["bytes"] == sum(p.stat().st_size for p in tmp_path.glob("*.json"))
     record = json.loads((tmp_path / "REQ-0001.json").read_text())
     assert not record["requestBody"] and "上限" in record["requestBodyNote"]
+
+
+class AsyncCaptureContext:
+    """模拟事件订阅，不启动浏览器；测试自行决定请求结束事件何时到达。"""
+    def __init__(self):
+        self.handlers = {}
+
+    def on(self, name, handler):
+        self.handlers.setdefault(name, []).append(handler)
+
+    def remove_listener(self, name, handler):
+        self.handlers[name].remove(handler)
+
+    def emit(self, name, value):
+        for handler in list(self.handlers.get(name, [])):
+            handler(value)
+
+
+class AsyncCaptureResponse:
+    def __init__(self, request, body, gate=None):
+        self.request, self.payload = request, body
+        self.status = 200
+        self.headers = {"content-type": "application/json", "content-length": str(len(body))}
+        self.started = asyncio.Event()
+        self.gate = gate or asyncio.Event()
+        if gate is None:
+            self.gate.set()
+
+    async def body(self):
+        self.started.set()
+        await self.gate.wait()
+        return self.payload
+
+
+class AsyncCaptureRequest:
+    def __init__(self, path, body=b'{"status":"OK"}', gate=None):
+        self.url = "http://target.test" + path
+        self.method, self.resource_type = "GET", "fetch"
+        self.headers, self.post_data, self.failure = {}, None, None
+        self.timing = {"responseEnd": 1}
+        self.reply = AsyncCaptureResponse(self, body, gate)
+
+    async def response(self):
+        return self.reply
+
+    async def sizes(self):
+        return {"responseBodySize": len(self.reply.payload)}
+
+
+def test_async_close_waits_for_late_requestfinished_and_rejects_new_requests(tmp_path):
+    async def exercise():
+        context = AsyncCaptureContext()
+        recorder = NetworkRecorder(tmp_path, "NET-TEST", "http://target.test")
+        recorder.bind_async(context)
+        request = AsyncCaptureRequest("/api/status")
+        context.emit("request", request)
+        closing = asyncio.create_task(recorder.aclose())
+        # 只让出一次事件循环，确保 aclose 已进入等待；不靠固定毫秒延时猜事件何时完成。
+        await asyncio.sleep(0)
+        assert recorder.closed and not closing.done()
+        context.emit("request", AsyncCaptureRequest("/api/too-late"))
+        context.emit("response", request.reply)
+        context.emit("requestfinished", request)
+        await closing
+        assert not recorder.pending and not recorder.jobs
+    asyncio.run(exercise())
+    index = json.loads((tmp_path / "index.json").read_text())
+    assert [row["url"] for row in index["requests"]] == ["http://target.test/api/status"]
+    record = json.loads((tmp_path / "REQ-0001.json").read_text())
+    assert record["state"] == "finished" and not record["responseBodyNote"]
+    assert json.loads(record["responseBody"]) == {"status": "OK"}
+
+
+def test_async_close_tracks_body_job_added_during_drain(tmp_path):
+    async def exercise():
+        context = AsyncCaptureContext()
+        recorder = NetworkRecorder(tmp_path, "NET-TEST", "http://target.test")
+        recorder.bind_async(context)
+        first_gate, second_gate = asyncio.Event(), asyncio.Event()
+        first = AsyncCaptureRequest("/api/first", b'{"number":1}', first_gate)
+        second = AsyncCaptureRequest("/api/second", b'{"number":2}', second_gate)
+        for request in [first, second]:
+            context.emit("request", request)
+            context.emit("response", request.reply)
+        context.emit("requestfinished", first)
+        first_job = next(iter(recorder.jobs))
+        closing = asyncio.create_task(recorder.aclose())
+        await first.reply.started.wait()
+        assert recorder.closed
+        # 第二个正文任务在收尾开始之后才出现，不能漏在最初的 jobs 快照之外。
+        context.emit("requestfinished", second)
+        await second.reply.started.wait()
+        first_gate.set()
+        await first_job
+        await asyncio.sleep(0)
+        try:
+            assert not closing.done(), "第二个正文仍在读取时，不应提前关闭采集器"
+        finally:
+            second_gate.set()
+            await closing
+        assert not recorder.pending and not recorder.jobs
+    asyncio.run(exercise())
+    for number in [1, 2]:
+        record = json.loads((tmp_path / f"REQ-{number:04}.json").read_text())
+        assert record["state"] == "finished" and not record["responseBodyNote"]
+        assert json.loads(record["responseBody"]) == {"number": number}
+
+
+def test_async_close_timeout_keeps_explicit_incomplete_record(tmp_path, monkeypatch):
+    import testpilot.network_capture as capture
+    monkeypatch.setattr(capture, "ASYNC_DRAIN_TIMEOUT", 0)
+    async def exercise():
+        context = AsyncCaptureContext()
+        recorder = NetworkRecorder(tmp_path, "NET-TEST", "http://target.test")
+        recorder.bind_async(context)
+        context.emit("request", AsyncCaptureRequest("/api/unfinished"))
+        await recorder.aclose()
+    asyncio.run(exercise())
+    record = json.loads((tmp_path / "REQ-0001.json").read_text())
+    assert record["state"] == "incomplete" and not record["responseBody"]
+    assert record["responseBodyNote"] == "会话结束时请求尚未完成"
+    assert json.loads((tmp_path / "index.json").read_text())["status"] == "completed"
 
 
 def test_browser_use_owned_cdp_session_can_be_observed_without_model(target, tmp_path):
@@ -218,7 +345,10 @@ def test_browser_use_owned_cdp_session_can_be_observed_without_model(target, tmp
     asyncio.run(exercise())
     index = json.loads((tmp_path / "index.json").read_text())
     assert any(r["url"].endswith("/api/status") for r in index["requests"])
-    record = json.loads((tmp_path / (index["requests"][0]["id"] + ".json")).read_text())
+    status_request = next(r for r in index["requests"] if r["url"].endswith("/api/status"))
+    record = json.loads((tmp_path / (status_request["id"] + ".json")).read_text())
+    assert record["state"] == "finished", f"响应未完整收尾：{record['state']}；{record['responseBodyNote']}"
+    assert record["responseBody"], f"响应正文未保存：{record['responseBodyNote']}"
     assert json.loads(record["responseBody"]) == {"status": "OK"}
 
 
@@ -308,7 +438,7 @@ def test_unfinished_capture_preserves_evidence_and_is_not_reported_running(captu
 
 def test_recorder_failure_does_not_replace_the_pytest_verdict(tmp_path, monkeypatch):
     from types import SimpleNamespace
-    from aiqa.runners import pytest_plugin
+    from testpilot.runners import pytest_plugin
     class BrokenRecorder:
         def close(self):
             raise RuntimeError("evidence unavailable")

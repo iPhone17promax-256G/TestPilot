@@ -5,27 +5,40 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from aiqa.api import app
-from aiqa.config import settings
-from aiqa.extensions import SkillInput,MCPInput,skill_import,parse_skill,credentials
-from aiqa.storage import Record,Job,session,read_record
-from aiqa.workspace import project_scope
-from aiqa.tools import dispatch
+from testpilot.api import app
+from testpilot.config import settings
+from testpilot.extensions import SkillInput,MCPInput,skill_import,parse_skill,credentials
+from testpilot.storage import Record,session,read_record
+from testpilot.workspace import project_scope
+from testpilot.tools import dispatch
 
 CONTENT="---\nname: acceptance-method\ndescription: 用于扩展能力验收。\n---\n\n先核对需求，再执行测试。\n"
 
 @pytest.fixture
 def workspace(tmp_path,monkeypatch):
     monkeypatch.setattr(settings,"data",tmp_path)
-    client=TestClient(app,headers={"Authorization":"Bearer "+settings.access_token})
+    client=TestClient(app, base_url="https://testserver",headers={"Authorization":"Bearer "+settings.access_token})
     projects=[client.post("/api/projects",json={"name":"扩展隔离测试 "+x}).json()["id"] for x in ["A","B"]]
     yield client,projects
     with session() as db:
         for row in db.scalars(select(Record).where((Record.project_id.in_(projects)) | (Record.id.in_(projects)))):
-            for job in db.scalars(select(Job).where(Job.record_id==row.id)):db.delete(job)
             db.delete(row)
 
-def headers(project):return {"X-AIQA-Project":project}
+def headers(project):return {"X-TestPilot-Project":project}
+
+def test_stdio_mcp_default_uses_current_deployment_image(monkeypatch):
+    """成品安装仅有发布镜像时，省略镜像也不能退回开发者机器上的旧标签。"""
+    monkeypatch.setattr(settings,"runner_image","testpilot-runtime:release-check")
+    connection=MCPInput(name="python-tools",transport="stdio",command="python")
+    assert connection.image=="testpilot-runtime:release-check"
+    assert MCPInput(name="custom",transport="stdio",command="python",image="custom-tools:1").image=="custom-tools:1"
+
+def test_extensions_exposes_deployment_default_without_credentials(workspace,monkeypatch):
+    client,(project,_)=workspace
+    monkeypatch.setattr(settings,"runner_image","testpilot-runtime:release-check")
+    result=client.get("/api/extensions",headers=headers(project))
+    assert result.status_code==200
+    assert result.json()["defaults"]=={"stdioImage":"testpilot-runtime:release-check"}
 
 def test_custom_skill_read_resources_paging_and_toggle(workspace):
     client,(a,b)=workspace
@@ -125,7 +138,7 @@ def test_mcp_input_validation(options):
     with pytest.raises(ValueError):MCPInput(name="invalid",**options)
 
 def test_external_tool_aliases_and_scrubbing():
-    from aiqa.mcp_client import MCPHub,tool_name
+    from testpilot.mcp_client import MCPHub,tool_name
     first={"name":"中文 服务","id":"MCP-123ABC"}
     second={"name":"中文 服务","id":"MCP-456DEF"}
     assert tool_name(first,"same tool")!=tool_name(second,"same tool")
@@ -136,7 +149,7 @@ def test_external_tool_aliases_and_scrubbing():
 
 def test_inline_authorization_redacts_raw_token_and_basic_password():
     import base64
-    from aiqa.mcp_client import MCPHub
+    from testpilot.mcp_client import MCPHub
     hub=MCPHub([])
     basic=base64.b64encode(b"test-user:private-basic-password").decode()
     hub._remember_credentials({"Authorization":"bEaReR private-inline-token","Proxy-Authorization":"Basic "+basic})
@@ -146,7 +159,7 @@ def test_inline_authorization_redacts_raw_token_and_basic_password():
 
 def test_parallel_credential_key_creation_is_atomic(tmp_path,monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
-    from aiqa.extensions import seal,cipher
+    from testpilot.extensions import seal,cipher
     monkeypatch.setattr(settings,"data",tmp_path)
     with ThreadPoolExecutor(max_workers=8) as executor:
         encrypted=list(executor.map(lambda i:seal({"value":i}),range(24)))
@@ -157,10 +170,10 @@ def test_parallel_credential_key_creation_is_atomic(tmp_path,monkeypatch):
 def test_orphan_mcp_deadline_cleanup(workspace,monkeypatch):
     import time
     import docker
-    from aiqa.mcp_client import cleanup_mcp_containers
+    from testpilot.mcp_client import cleanup_mcp_containers
     removed=[]
     class Container:
-        def __init__(self,identity,deadline):self.id=identity;self.labels={"aiqa.mcp.owner":"missing-record","aiqa.mcp.deadline":str(deadline)}
+        def __init__(self,identity,deadline):self.id=identity;self.labels={"testpilot.mcp.owner":"missing-record","testpilot.mcp.deadline":str(deadline)}
         def remove(self,force=False):removed.append(self.id)
     class Containers:
         def list(self,**kwargs):return [Container("expired",0),Container("healthy",time.time()+300)]

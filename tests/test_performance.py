@@ -1,8 +1,8 @@
 import csv
 import xml.etree.ElementTree as ET
 import pytest
-from aiqa.performance import build_plan, materialize, read_metrics, PerformanceConfig, validate_plan
-from aiqa.assets import validate_assets, version_hash
+from testpilot.performance import build_plan, materialize, read_metrics, PerformanceConfig, validate_plan
+from testpilot.assets import validate_assets, version_hash
 
 def test_execution_copy_enforces_environment_and_staged_load_without_modifying_source():
     source=build_plan([{"name":"查询","path":"/api/info","headers":{"Authorization":"Bearer ${token}"}}])
@@ -51,7 +51,7 @@ def test_invalid_jmx_is_rejected_before_execution():
 
 def test_agent_tool_preserves_version_config_instead_of_langchain_runtime_config():
     from langchain_core.tools import StructuredTool
-    from aiqa.tools import SaveCase
+    from testpilot.tools import SaveCase
     received={}
     def operation(**arguments):
         received.update(arguments)

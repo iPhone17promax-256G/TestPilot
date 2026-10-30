@@ -8,7 +8,7 @@ import {state,caseName,cancelRun} from '../store'
 import {dateTime,statusLabels} from '../uiHelpers'
 import {kindLabels,type Kind} from '../types'
 const route=useRoute(),status=ref('all'),query=ref(''),kind=ref('all'),environment=ref('all'),period=ref('all'),selected=ref(''),page=ref(1),pageSize=25
-const filterKey='aiqa-runs-filters:'+state.projectId
+const filterKey='testpilot-runs-filters:'+state.projectId
 try{const saved=JSON.parse(sessionStorage.getItem(filterKey)||'{}');for(const [field,key] of [[status,'status'],[query,'query'],[kind,'kind'],[environment,'environment'],[period,'period']] as const)field.value=saved[key]||field.value;page.value=saved.page||1}catch{}
 function persist(){sessionStorage.setItem(filterKey,JSON.stringify({status:status.value,query:query.value,kind:kind.value,environment:environment.value,period:period.value,page:page.value}))}
 watch([status,query,kind,environment,period],()=>{page.value=1;persist()});watch(page,persist)

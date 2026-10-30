@@ -1,29 +1,36 @@
-name: aiqa-client
+name: testpilot-client
 services:
   executor:
-    image: aiqa-runtime:0.1
+    image: testpilot-runtime:0.1
     command:
     - python
     - -m
-    - aiqa.local_executor
+    - testpilot.local_executor
     env_file:
     - path: ../.client/execution.env
       required: false
     environment:
-      AIQA_ROLE: gateway
-      AIQA_PLATFORM_URL: ${AIQA_CLIENT_PLATFORM_URL:-http://api:8020}
-      AIQA_CLIENT_ORIGIN: ${AIQA_CLIENT_ORIGIN:-http://127.0.0.1:8020}
-      AIQA_CLIENT_BIND: 0.0.0.0
-      AIQA_CLIENT_ROOT: /client
-      AIQA_CLIENT_HOST_ROOT: ${AIQA_CLIENT_HOST_ROOT}
-      AIQA_DATABASE_URL: sqlite:////client/gateway.sqlite
-      AIQA_DATA: /client/scratch
+      TESTPILOT_ROLE: gateway
+      TESTPILOT_PLATFORM_URL: ${TESTPILOT_CLIENT_PLATFORM_URL:-https://api:8020}
+      TESTPILOT_CLIENT_ORIGIN: ${TESTPILOT_CLIENT_ORIGIN:-https://127.0.0.1:8020}
+      TESTPILOT_TLS_CERT_FILE: /tls/executor.pem
+      TESTPILOT_TLS_KEY_FILE: /tls/executor-key.pem
+      SSL_CERT_FILE: /tls/ca-bundle.pem
+      REQUESTS_CA_BUNDLE: /tls/ca-bundle.pem
+      TESTPILOT_CLIENT_BIND: 0.0.0.0
+      TESTPILOT_CLIENT_ROOT: /client
+      TESTPILOT_CLIENT_HOST_ROOT: ${TESTPILOT_CLIENT_HOST_ROOT}
+      TESTPILOT_DATABASE_URL: sqlite:////client/gateway.sqlite
+      TESTPILOT_DATA: /client/scratch
       PYTHONPATH: /app/src
       BROWSER_USE_LOGGING_LEVEL: warning
     volumes:
     - ../.client:/client
     - ../src:/app/src:ro
     - ../skills:/app/skills:ro
+    - ${TESTPILOT_TLS_DIR:?请先生成本地HTTPS证书}/executor.pem:/tls/executor.pem:ro
+    - ${TESTPILOT_TLS_DIR:?请先生成本地HTTPS证书}/executor-key.pem:/tls/executor-key.pem:ro
+    - ${TESTPILOT_TLS_DIR:?请先生成本地HTTPS证书}/ca-bundle.pem:/tls/ca-bundle.pem:ro
     - /var/run/docker.sock:/var/run/docker.sock
     ports:
     - 127.0.0.1:8021:8021
@@ -37,10 +44,10 @@ services:
     restart: unless-stopped
   appium:
     labels:
-      aiqa.component: app
+      testpilot.component: app
     profiles:
     - android
-    image: aiqa-appium:0.1
+    image: testpilot-appium:0.1
     entrypoint: /opt/start-appium.sh
     volumes:
     - android:/root/.android/avd
@@ -55,16 +62,16 @@ services:
     cpus: 2
     shm_size: 512mb
     restart: unless-stopped
-    container_name: aiqa-appium-1
+    container_name: testpilot-appium-1
 networks:
   outbound: null
   targets:
     external: true
-    name: aiqa-targets
+    name: testpilot-targets
   platform:
     external: true
-    name: aiqa-entry
+    name: testpilot-entry
 volumes:
   android:
     external: true
-    name: aiqa_android
+    name: testpilot_android

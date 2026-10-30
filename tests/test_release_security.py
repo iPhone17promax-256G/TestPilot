@@ -2,12 +2,12 @@
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from aiqa.api import app
-from aiqa.config import settings
-from aiqa.access import authorize_artifact
-from aiqa.storage import Record, session, uid
-from aiqa.tools import dispatch
-from aiqa.workspace import project_scope
+from testpilot.api import app
+from testpilot.config import settings
+from testpilot.access import authorize_artifact
+from testpilot.storage import Record, session, uid
+from testpilot.tools import dispatch
+from testpilot.workspace import project_scope
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def evidence(tmp_path, monkeypatch):
 
 def test_normal_evidence_works_and_direct_other_project_is_denied(evidence):
     root, a, b, own, other, inspection = evidence
-    client = TestClient(app, headers={"Authorization": "Bearer " + settings.access_token, "X-AIQA-Project": a})
+    client = TestClient(app, base_url="https://testserver", headers={"Authorization": "Bearer " + settings.access_token, "X-TestPilot-Project": a})
     response = client.get(f"/api/artifacts/runs/{own}/nested/log.txt")
     assert response.status_code == 200 and response.text == "own evidence"
     assert response.headers["cache-control"] == "private, no-store"
@@ -61,7 +61,7 @@ def test_path_traversal_and_ambiguous_paths_are_rejected(evidence, tail):
 
 def test_encoded_http_traversal_does_not_cross_project_boundary(evidence):
     _, a, _, own, other, _ = evidence
-    client = TestClient(app, headers={"Authorization": "Bearer " + settings.access_token, "X-AIQA-Project": a})
+    client = TestClient(app, base_url="https://testserver", headers={"Authorization": "Bearer " + settings.access_token, "X-TestPilot-Project": a})
     response = client.get(f"/api/artifacts/runs/{own}/%2e%2e/{other}/secret.txt")
     assert response.status_code == 400
     assert "other project evidence" not in response.text
@@ -72,7 +72,7 @@ def test_symlink_cannot_escape_the_authorized_run(evidence, private):
     root, a, _, own, other, _ = evidence
     link = root / f"runs/{own}/leak.txt"
     link.symlink_to(root / ("private.txt" if private else f"runs/{other}/secret.txt"))
-    client = TestClient(app, headers={"Authorization": "Bearer " + settings.access_token, "X-AIQA-Project": a})
+    client = TestClient(app, base_url="https://testserver", headers={"Authorization": "Bearer " + settings.access_token, "X-TestPilot-Project": a})
     assert client.get(f"/api/artifacts/runs/{own}/leak.txt").status_code == 400
     with project_scope(a), pytest.raises(ValueError):
         dispatch("artifacts_read", {"path": f"runs/{own}/leak.txt"})
@@ -84,18 +84,18 @@ def test_symlink_cannot_escape_the_authorized_run(evidence, private):
     ("/api/session", {"token": "fake-test-token"}),
 ])
 def test_cross_origin_public_authentication_is_rejected_before_credentials(path, body, monkeypatch):
-    from aiqa import authentication
+    from testpilot import authentication
     def unexpected(*args):
         raise AssertionError("cross-origin authentication must not reach the account operation")
     monkeypatch.setattr(authentication, "login_account", unexpected)
     monkeypatch.setattr(authentication, "setup_account", unexpected)
-    response = TestClient(app).post(path, json=body, headers={"Origin": "https://untrusted.example"})
+    response = TestClient(app, base_url="https://testserver").post(path, json=body, headers={"Origin": "https://untrusted.example"})
     assert response.status_code == 403
     assert "set-cookie" not in response.headers
 
 
 def test_same_origin_browser_requests_and_originless_clients_still_work():
-    client = TestClient(app, headers={"Authorization": "Bearer " + settings.access_token})
-    assert client.post("/api/tools/cases_list", json={}, headers={"Origin": "http://testserver"}).status_code == 200
+    client = TestClient(app, base_url="https://testserver", headers={"Authorization": "Bearer " + settings.access_token})
+    assert client.post("/api/tools/cases_list", json={}, headers={"Origin": "https://testserver"}).status_code == 200
     assert client.post("/api/tools/cases_list", json={}).status_code == 200
     assert client.get("/api/auth/me").headers["cache-control"] == "private, no-store"

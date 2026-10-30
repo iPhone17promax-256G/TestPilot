@@ -1,8 +1,8 @@
-# AIQA
+# TestPilot
 
 **让 AI 使用真实测试工具，完成从需求到测试结果的完整流程。**
 
-AIQA 是一个支持 API、Web UI、JMeter 性能和 Android APP 的测试平台。你可以在界面中编排步骤、执行测试，也可以与内置 Agent 对话，让它读取需求、观察页面、编写用例、执行、查看证据并修订。生成的用例会保存为可编辑、可复跑的测试资产。
+TestPilot 是一个支持 API、Web UI、JMeter 性能和 Android APP 的测试平台。你可以在界面中编排步骤、执行测试，也可以与内置 Agent 对话，让它读取需求、观察页面、编写用例、执行、查看证据并修订。生成的用例会保存为可编辑、可复跑的测试资产。
 
 [实测演示](#实测演示) · [核心能力](#核心能力) · [快速开始](#快速开始) · [外部接入](#外部接入) · [开发与验证](#开发与验证)
 
@@ -41,6 +41,7 @@ Agent 通过 browser-use 观察 MM 登录页面，再保存可视化步骤并执
 | 性能测试 | JMeter；可视化生成或导入 JMX、CSV 参数化、单用户验证、负载阶段、P95/P99 与失败率检查 |
 | Android APP 测试 | Appium + UiAutomator2；应用与设备管理、截图和元素观察、可视化步骤、设备独占与执行报告 |
 | 项目资料与附件 | 保存需求和接口说明；聊天附加 PDF、DOCX 等文档；Agent 按需分页读取正文 |
+| 项目资料 RAG | 按项目手动建立 Qdrant 索引，增量复用、混合检索、引用原文位置；新资料不自动向量化，聊天附件不参与 |
 | Skill 与 MCP 扩展 | 导入自定义 Skill、连接外部 MCP；说明书按需读取，工具由 Agent 选择调用 |
 | 模型与权限 | 多模型切换、支持的思考深度、只读/自动/免确认模式；自动模式由 AI 判断是否需要人工批准 |
 | 执行证据 | 用例版本、源码哈希、环境快照、步骤结果、日志、截图和指标；保存后无需模型即可复跑 |
@@ -54,6 +55,8 @@ flowchart LR
     User[用户 / 浏览器] --> API[平台 API]
     External[外部 Agent / MCP / CLI] --> API
     API --> DB[(MySQL)]
+    API --> Knowledge[(Qdrant / 项目资料向量)]
+    API --> Queue[(Redis Streams / Job 状态与租约)]
     API --> Files[项目资料与执行产物]
     Executor[独立执行服务] -->|领取任务 / 回传结果| API
     Executor --> Agent[多轮测试 Agent]
@@ -63,12 +66,13 @@ flowchart LR
     Runner --> Target[被测系统]
 ```
 
-- **平台 API**负责身份、项目、资产、任务和结果，HTTP 请求进程不运行 Agent 循环。
+- **平台 API**负责身份、项目、资产、任务和结果，请求进程不运行 Agent 循环；浏览器、外部客户端与执行服务访问平台均使用 HTTPS。
 - **执行服务**负责运行 Agent、浏览器探索和测试任务；测试代码进入独立容器执行。
-- **MySQL**保存平台记录，执行服务的 SQLite 保存任务缓存与 Agent 恢复点，文件目录保存资料和证据。
-- **外部 Agent**通过 MCP 或 CLI 直接使用测试器，也可以使用自己的模型与浏览器工具。
+- **MySQL**保存平台业务记录和可靠投递事件；**Redis**保存 Job 队列、领取状态和租约，执行器等待通知后领取。执行服务的 SQLite 保存业务缓存与 Agent 恢复点，文件目录保存资料和证据。
+- **Qdrant**保存用户手动建立的项目资料索引；向量模型配置和有效片段清单在 MySQL，密钥留在执行端。Agent 通过资料搜索工具按需检索。
+- **外部 Agent**通过 MCP 或 CLI 编写用例、启动测试和读取报告，也可以使用自己的模型与浏览器工具。
 
-技术栈：Python 3.12 · FastAPI · SQLAlchemy · MySQL · LangChain Agent / LangGraph 恢复点 · HTTPX · Playwright · browser-use · JMeter · Appium · Vue 3 · TypeScript · Docker。
+技术栈：Python 3.12 · FastAPI · SQLAlchemy · MySQL · Redis Streams · Qdrant · LangChain Agent / LangGraph 恢复点 · HTTPX · Playwright · browser-use · JMeter · Appium · Vue 3 · TypeScript · Docker。
 
 ## 快速开始
 
@@ -76,13 +80,24 @@ flowchart LR
 
 准备 Linux，或 Windows + Ubuntu WSL；安装 Docker Engine/Compose、Node.js 22.6+ 和宿主机 Python 3。运行时的 Python 3.12、测试依赖与 Chromium 随 Docker 镜像构建。
 
-在仓库目录执行：
+获取源码并进入仓库目录：
+
+```bash
+git clone https://github.com/iPhone17promax-256G/TestPilot.git
+cd TestPilot
+```
+
+启动本地模式：
 
 ```bash
 bash scripts/start.sh --local
 ```
 
-打开 **http://127.0.0.1:8020**，本地模式无需登录。首次启动会构建前端和镜像、生成私有配置并启动数据库、API 和执行服务。
+首次启动会构建前端和镜像、生成私有配置与本地 HTTPS 证书，并启动 MySQL、Redis、Qdrant、API 和执行服务。
+
+**首次安装按这个顺序操作：启动服务 → 手动信任本次安装的 CA → 打开网页。** 证书会自动生成并配置到服务，但脚本**不会自动修改 Windows 或 Linux 的系统信任库**；请先完成下方[证书信任步骤](#https-与本地证书)。已有 CA 没有更换时，不必重复导入。
+
+信任完成后打开 **https://127.0.0.1:8020**，本地模式无需登录。平台不接受明文 HTTP。已有安装升级请使用 `--rebuild`；从旧调度方式迁移时，旧 Job 会先备份，在途任务标为中断，需确认实际结果后继续。
 
 1. 在“项目与环境”创建项目，填写被测系统地址和测试容器可访问的地址。
 2. 在“设置 → 模型”添加模型地址、模型 ID 和 API Key，测试连接。
@@ -106,8 +121,8 @@ Agent 只能执行已配置、可访问的环境；测试前应准备明确的�
 
 | 模式 | 登录 | Agent 和测试运行位置 | 适合场景 |
 | --- | --- | --- | --- |
-| `local` | 免登录，固定本地工作空间 | 安装 AIQA 的电脑 | 个人使用、本机测试、内网目标 |
-| `server` | 管理员创建账号，用户登录 | 部署 AIQA 的内网服务器 | 团队共享平台、浏览器访问 |
+| `local` | 免登录，固定本地工作空间 | 安装 TestPilot 的电脑 | 个人使用、本机测试、内网目标 |
+| `server` | 管理员创建账号，用户登录 | 部署 TestPilot 的内网服务器 | 团队共享平台、浏览器访问 |
 
 获得离线成品包并解压后：
 
@@ -115,35 +130,64 @@ Agent 只能执行已配置、可访问的环境；测试前应准备明确的�
 # 本地部署
 bash install.sh --offline
 
-# 公司内网服务器部署
-bash install.sh --offline --mode server
+# 公司内网服务器部署，填实际访问的域名或 IP，可重复提供 --host
+bash install.sh --offline --mode server --host testpilot.example.internal
 ```
 
 Windows 可使用 `./install.ps1 -Offline`。模式在安装时确定；源码开发启动默认只暴露回环端口，团队访问使用成品包的 server 模式。安装脚本位于 `deploy/package/`，依赖 Docker/Compose。停止服务使用 `docker compose --env-file install.env stop`，修复使用 `bash install.sh --repair`；两者保留数据。
+
+### HTTPS 与本地证书
+
+源码启动默认将证书保存在仓库 `.tls/`，成品包保存在安装目录 `tls/`。每份安装生成自己的本地 CA，平台和执行服务分别使用各自的服务器证书。访问必须使用证书覆盖的地址；默认支持 `localhost`、`127.0.0.1` 和内部服务名。公司内网访问在安装时用 `--host` 增加实际域名或 IP，Windows 对应 `-CertificateHost testpilot.example.internal`。
+
+**Windows 浏览器：**首次使用需把**本次安装**的 `rootCA.pem` 加入当前 Windows 用户的信任库。源码在 WSL 时，先在刚才启动服务的 **WSL 仓库目录**执行：
+
+```bash
+wslpath -w "$PWD/.tls/rootCA.pem"
+```
+
+复制输出的 Windows 路径，然后在 **Windows PowerShell** 执行（替换尖括号内容，保留引号）：
+
+```powershell
+Import-Certificate -FilePath "<上一步输出的 rootCA.pem 路径>" -CertStoreLocation Cert:\CurrentUser\Root
+```
+
+成品包的证书位于解压安装目录 `tls/rootCA.pem`，使用它的实际 Windows 路径替换上面的路径。
+
+**Ubuntu / WSL 客户端：**需要从 Ubuntu 或 WSL 调用平台时，在源码仓库目录执行：
+
+```bash
+sudo cp .tls/rootCA.pem /usr/local/share/ca-certificates/testpilot-local.crt
+sudo update-ca-certificates
+```
+
+成品包执行时将命令里的 `.tls/` 改成 `tls/`。Windows 浏览器与 WSL 程序使用不同的信任库，使用哪一端就为哪一端配置信任；两端都使用时需分别配置。CLI 或 Python 客户端也可通过 `SSL_CERT_FILE` 指向本次安装的 `ca-bundle.pem`。容器内的 API 与执行服务已经配置这个信任文件，仍会校验服务器证书。
+
+`rootCA.pem` 可以提供给需要访问的客户端；**`rootCA-key.pem` 是签发私钥，不能分享或提交**。常驻容器只挂载自己的服务器证书、私钥和公开 CA bundle，不挂载 CA 签发私钥。现有 HTTP 地址应改为 HTTPS；平台不会通过重定向接收已包含密码或 Token 的明文请求。这个要求针对 TestPilot 自身通信，被测系统仍可按测试需要使用 HTTP。
 
 ### 目标地址与容器地址
 
 容器里的 `localhost` 指容器自己。人用浏览器访问的目标地址，与测试容器实际使用的地址可以不同。
 
-例如，被测服务与 AIQA 在同一 Docker 网络时，可登记浏览器地址 `http://127.0.0.1:8065`，执行地址 `http://mm-target:8065`。被测服务位于宿主机时，可以配置容器可达的 `host.docker.internal` 地址；位于公司内网时使用执行服务器能访问的内网地址。
+例如，被测服务与 TestPilot 在同一 Docker 网络时，可登记浏览器地址 `http://127.0.0.1:8065`，执行地址 `http://mm-target:8065`。被测服务位于宿主机时，可以配置容器可达的 `host.docker.internal` 地址；位于公司内网时使用执行服务器能访问的内网地址。
 
 JMeter 是独立组件；Android 模拟器还需要 KVM，真机需可用 Appium 节点和设备连接。运行环境页检查实际执行端，不检查浏览器访问者电脑上的 Python。
 
 ## 外部接入
 
-AIQA 对外提供 **Streamable HTTP MCP、stdio MCP 和 CLI**。外部 Agent 负责决策，AIQA 负责存储、执行和返回真实证据，不会自动转交给内置 Agent。
+TestPilot 对外提供 **Streamable HTTP MCP、stdio MCP 和 CLI**。外部 Agent 负责决策，TestPilot 负责存储、执行和返回真实证据，不会自动转交给内置 Agent。
 
 HTTP MCP 地址：
 
 ```text
-http://127.0.0.1:8020/mcp/
+https://127.0.0.1:8020/mcp/
 ```
 
 在 MCP 客户端中配置此地址。server 模式先在“设置 → 外部接入”创建 API Token；请求头使用：
 
 ```text
-Authorization: Bearer <AIQA_API_TOKEN>
-X-AIQA-Project: <PROJECT_ID>
+Authorization: Bearer <TESTPILOT_API_TOKEN>
+X-TestPilot-Project: <PROJECT_ID>
 ```
 
 典型调用链：
@@ -153,25 +197,26 @@ project_context → steps_capabilities → cases_save_revision
                 → runs_start → runs_get → artifacts_read
 ```
 
-内置 Agent 可使用 `browser_explore`。当前对外 MCP 不直接开放 browser-use 或辅助命令执行，外部 Agent 可以用自己的浏览器工具观察页面，再调用 AIQA 保存、执行 Web 用例。
+内置 Agent 可使用 `browser_explore`。当前对外 MCP 不直接开放 browser-use 或辅助命令执行，外部 Agent 可以用自己的浏览器工具观察页面，再调用 TestPilot 保存、执行 Web 用例。
 
 CLI / stdio 入口（需要 Python 3.12 环境安装本项目）：
 
 ```bash
 pip install .
-export AIQA_URL=http://127.0.0.1:8020
-export AIQA_ACCESS_TOKEN='<AIQA_API_TOKEN>'
-export AIQA_PROJECT_ID='<PROJECT_ID>'
+export TESTPILOT_URL=https://127.0.0.1:8020
+export SSL_CERT_FILE='/absolute/path/to/TestPilot/.tls/ca-bundle.pem'
+export TESTPILOT_ACCESS_TOKEN='<TESTPILOT_API_TOKEN>'
+export TESTPILOT_PROJECT_ID='<PROJECT_ID>'
 
-aiqa status
-aiqa environments
-aiqa case list
-aiqa run start "<CASE_ID>" 1 --environment "<ENVIRONMENT_ID>"
-aiqa run get "<RUN_ID>" --wait 90
-aiqa mcp serve
+testpilot status
+testpilot environments
+testpilot case list
+testpilot run start "<CASE_ID>" 1 --environment "<ENVIRONMENT_ID>"
+testpilot run get "<RUN_ID>" --wait 90
+testpilot mcp serve
 ```
 
-将尖括号中的占位符换成实际 Token 和 ID。访问 AIQA 的 API Token 与调用模型供应商的 API Key 是两种不同凭据。
+将尖括号中的占位符换成实际 Token 和 ID。访问 TestPilot 的 API Token 与调用模型供应商的 API Key 是两种不同凭据。
 
 ## 开发与验证
 
@@ -189,7 +234,9 @@ python3 scripts/package_release.py --offline --performance
 bash scripts/stop.sh
 ```
 
-检查脚本需要运行中的 MySQL 和已构建的测试镜像。2026-10-07 验收通过 **211 项后端测试、2 项前端测试和生产构建**；本地/服务端成品安装均真实执行过 MM 接口、Web UI 和 JMeter 测试。
+检查脚本需要运行中的 MySQL、Redis 和已构建的测试镜像。后端检查使用独立临时数据库、随机 Redis 键前缀和临时文件目录，结束后清理，不调用真实模型。GitHub Actions 也会执行前端检查与隔离后端回归；实际结果见仓库 Actions 页面。API、Web UI、JMeter 单用户验证、Android APP 与外部 MCP 的真实演示和业务验收需要另外准备对应环境。
+
+0.2.0 发布前本地验收：**303 项后端测试、15 项前端测试、生产构建与发布镜像构建通过，前端依赖审计 0 漏洞**。
 
 提交问题时，请提供部署模式、操作步骤、实际结果、预期结果和相关 Task/Run ID；提交改动时说明验证方式。不要上传 API Key、密码、访问令牌或包含敏感信息的截图和 Trace。
 
@@ -197,6 +244,12 @@ bash scripts/stop.sh
 
 目前面向个人与可信团队部署，已提供账号和项目成员隔离，不是面向不可信租户的托管 SaaS。执行服务持有 Docker 控制权限，应由可信维护者管理；测试容器本身不挂载 Docker socket，也不注入模型密钥或数据库凭据。
 
-local 模式仅供本机访问；server 模式建议部署在内网并配置 HTTPS。模型 Key 按账号管理：本地存于本机执行目录，服务端存于加密凭据文件。备份时应同时保存数据库、资料/报告目录和执行器凭据。
+local 模式仅供本机访问；server 模式用于内网团队访问，两种模式都要求 HTTPS。模型 Key 按账号管理：本地存于本机执行目录，服务端存于加密凭据文件。备份时应同时保存数据库、资料/报告目录和执行器凭据；证书目录中的私钥也须按私密文件妥善保管。
 
 性能首期使用单个发压节点，APP 首期支持 Android；扫描文档暂无 OCR。Agent 的探索和生成需要实际执行验证，不能仅凭回答文字判定测试通过。
+
+## 开源与贡献
+
+TestPilot 自有源码采用 [MIT License](LICENSE)，第三方依赖和组件遵循各自的许可，见[第三方组件说明](THIRD_PARTY_NOTICES.md)。欢迎按[贡献指南](CONTRIBUTING.md)反馈问题或提交改动；涉及凭据泄漏、权限绕过等安全问题，请参考[安全反馈说明](SECURITY.md)。
+
+仓库只包含源码、安装模板及公开演示资料。个人学习笔记、密钥、证书私钥、数据库和运行产物不随仓库发布。

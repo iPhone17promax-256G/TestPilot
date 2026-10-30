@@ -20,7 +20,7 @@ def test_login_controls(page, base_url):
 
 def test_invalid_login_remains_on_login(page, base_url):
     open_login(page, base_url)
-    page.locator("#input_loginId").fill("aiqa-nonexistent-user")
+    page.locator("#input_loginId").fill("testpilot-nonexistent-user")
     page.locator("#input_password-input").fill("invalid-test-password")
     page.locator("#saveSetting").click()
     expect(page.get_by_text(re.compile(r"invalid", re.IGNORECASE))).to_be_visible()

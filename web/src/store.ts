@@ -2,13 +2,13 @@ import { reactive } from 'vue'
 import {setClientAccount, configureRuntime, modelSelection, localClient} from './localClient'
 import type { AgentTask, Run, TestCase, Environment, Application, Device, ChatAttachment, CaptureLevel, ProjectSource, PermissionMode } from './types'
 interface Data {applications:Application[];devices:Device[];cases:TestCase[];runs:Run[];tasks:AgentTask[];environments:Environment[];sources:ProjectSource[];settings:{model:string;baseUrl:string;maxSteps:number;configured:boolean};projectId:string;projects:{id:string;name:string;description:string;ownerId?:string;members?:string[]}[];projectName:string;projectDescription:string}
-export const state=reactive<Data>({applications:[],devices:[],cases:[],runs:[],tasks:[],environments:[],sources:[],settings:{model:'ark-code-latest',baseUrl:'',maxSteps:24,configured:false},projectId:localStorage.getItem('aiqa-project')||'PROJECT',projects:[],projectName:'',projectDescription:''})
+export const state=reactive<Data>({applications:[],devices:[],cases:[],runs:[],tasks:[],environments:[],sources:[],settings:{model:'ark-code-latest',baseUrl:'',maxSteps:24,configured:false},projectId:localStorage.getItem('testpilot-project')||'PROJECT',projects:[],projectName:'',projectDescription:''})
 export const ui=reactive({toast:'',error:'',loading:true,connected:false,authRequired:true,initialized:false,setupRequired:false,deploymentMode:'server',managedExecutor:false,user:null as {id:string;username:string;role:string}|null})
 let timer:ReturnType<typeof setTimeout>
 const snapshots=new Map<string,{etag:string;data:Data}>()
 export function notify(message:string){ui.toast=message.replace(/^Error:\s*/,'');clearTimeout(timer);timer=setTimeout(()=>ui.toast='',6000)}
 export async function request<T=any>(path:string,body?:unknown):Promise<T>{
- const headers:Record<string,string>={'X-AIQA-Project':state.projectId}
+ const headers:Record<string,string>={'X-TestPilot-Project':state.projectId}
  if(body!==undefined)headers['Content-Type']='application/json'
  if(path==='/state'&&snapshots.has(state.projectId))headers['If-None-Match']=snapshots.get(state.projectId)!.etag
  const response=await fetch('/api'+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body)})
@@ -21,7 +21,7 @@ export async function request<T=any>(path:string,body?:unknown):Promise<T>{
 }
 export async function uploadChatAttachment(file:File):Promise<ChatAttachment>{
  if(file.size>10*1024*1024)throw new Error('单个文件最多 10 MB')
- const response=await fetch('/api/attachments?filename='+encodeURIComponent(file.name),{method:'POST',headers:{'X-AIQA-Project':state.projectId,'Content-Type':'application/octet-stream'},body:file})
+ const response=await fetch('/api/attachments?filename='+encodeURIComponent(file.name),{method:'POST',headers:{'X-TestPilot-Project':state.projectId,'Content-Type':'application/octet-stream'},body:file})
  const data=await response.json()
  if(response.status===401){ui.authRequired=true;ui.initialized=false}
  if(!response.ok)throw new Error(data.message||data.detail||`HTTP ${response.status}`)
@@ -30,7 +30,7 @@ export async function uploadChatAttachment(file:File):Promise<ChatAttachment>{
 export async function uploadProjectSource(file:File,projectId=state.projectId):Promise<ProjectSource>{
  if(!file.size)throw new Error('文件不能为空')
  if(file.size>10*1024*1024)throw new Error('单个文件最多 10 MB')
- const response=await fetch('/api/sources/upload?filename='+encodeURIComponent(file.name),{method:'POST',headers:{'X-AIQA-Project':projectId,'Content-Type':'application/octet-stream'},body:file})
+ const response=await fetch('/api/sources/upload?filename='+encodeURIComponent(file.name),{method:'POST',headers:{'X-TestPilot-Project':projectId,'Content-Type':'application/octet-stream'},body:file})
  const data=await response.json()
  if(response.status===401){ui.authRequired=true;ui.initialized=false}
  if(!response.ok)throw new Error(data.message||data.detail||`HTTP ${response.status}`)
@@ -42,10 +42,10 @@ export async function refresh(force=false):Promise<void>{
  refreshPromise=(async()=>{try{Object.assign(state,await request<Data>('/state'));ui.connected=true;ui.initialized=true;ui.error=''}catch(error){ui.connected=false;ui.error=String(error)}finally{ui.loading=false}})()
  try{await refreshPromise}finally{refreshPromise=undefined}
 }
-export async function initialize(){try{const auth=await request('/auth/me');ui.deploymentMode=auth.deploymentMode||'server';ui.managedExecutor=auth.managedExecutor===true;configureRuntime(ui.deploymentMode,ui.managedExecutor,auth.user?.role==='admin');state.projectId=localStorage.getItem('aiqa-project:'+auth.user?.id)||'PROJECT';ui.user=auth.user;setClientAccount(auth.user?.id||'');ui.setupRequired=auth.setupRequired;ui.authRequired=!auth.user;if(auth.user)await refresh()}catch(error){ui.error=String(error)}finally{ui.loading=false}}
-export async function login(username:string,password:string){const result=await request(ui.setupRequired?'/auth/setup':'/auth/login',{username,password});ui.user=result.user;state.projectId=localStorage.getItem('aiqa-project:'+result.user.id)||'PROJECT';configureRuntime(ui.deploymentMode,ui.managedExecutor,result.user.role==='admin');setClientAccount(result.user.id);snapshots.clear();ui.authRequired=false;ui.setupRequired=false;await refresh(true)}
+export async function initialize(){try{const auth=await request('/auth/me');ui.deploymentMode=auth.deploymentMode||'server';ui.managedExecutor=auth.managedExecutor===true;configureRuntime(ui.deploymentMode,ui.managedExecutor,auth.user?.role==='admin');state.projectId=localStorage.getItem('testpilot-project:'+auth.user?.id)||'PROJECT';ui.user=auth.user;setClientAccount(auth.user?.id||'');ui.setupRequired=auth.setupRequired;ui.authRequired=!auth.user;if(auth.user)await refresh()}catch(error){ui.error=String(error)}finally{ui.loading=false}}
+export async function login(username:string,password:string){const result=await request(ui.setupRequired?'/auth/setup':'/auth/login',{username,password});ui.user=result.user;state.projectId=localStorage.getItem('testpilot-project:'+result.user.id)||'PROJECT';configureRuntime(ui.deploymentMode,ui.managedExecutor,result.user.role==='admin');setClientAccount(result.user.id);snapshots.clear();ui.authRequired=false;ui.setupRequired=false;await refresh(true)}
 export async function logout(){await request('/auth/logout',{});ui.user=null;setClientAccount('');ui.authRequired=true;ui.initialized=false;snapshots.clear();state.tasks=[];state.cases=[];state.runs=[]}
-export async function switchProject(id:string){if(refreshPromise)await refreshPromise;state.projectId=id;localStorage.setItem('aiqa-project:'+ui.user?.id,id);ui.loading=true;ui.initialized=false;Object.assign(state,{cases:[],runs:[],tasks:[],environments:[],sources:[],applications:[]});await refresh(true)}
+export async function switchProject(id:string){if(refreshPromise)await refreshPromise;state.projectId=id;localStorage.setItem('testpilot-project:'+ui.user?.id,id);ui.loading=true;ui.initialized=false;Object.assign(state,{cases:[],runs:[],tasks:[],environments:[],sources:[],applications:[]});await refresh(true)}
 async function action<T>(fn:()=>Promise<T>):Promise<T>{try{return await fn()}catch(error){notify(String(error));throw error}}
 export function latestRun(id:string,revision?:number){const number=revision??state.cases.find(c=>c.id===id)?.revisions.at(-1)?.number;return state.runs.find(r=>r.caseId===id&&r.revision===number)}
 export function caseName(id:string){return state.cases.find(c=>c.id===id)?.name??id}

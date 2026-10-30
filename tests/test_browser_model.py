@@ -1,5 +1,5 @@
 import pytest
-from aiqa.agent.browser_model import json_object
+from testpilot.agent.browser_model import json_object
 
 
 def test_gateway_can_wrap_complete_json_in_explanation():

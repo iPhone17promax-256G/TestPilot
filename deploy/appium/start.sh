@@ -2,17 +2,17 @@
 set -euo pipefail
 if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then echo "Android 模拟器需要可访问的 /dev/kvm" >&2; exit 1; fi
 mkdir -p /root/.android/avd
-if [[ ! -f /root/.android/avd/aiqa-android.ini ]]; then
- echo no | avdmanager create avd --name aiqa-android --package 'system-images;android-30;default;x86_64' --device pixel
+if [[ ! -f /root/.android/avd/testpilot-android.ini ]]; then
+ echo no | avdmanager create avd --name testpilot-android --package 'system-images;android-30;default;x86_64' --device pixel
 fi
-# Own the AVD volume before clearing lock files left by an abrupt container/WSL exit.
-exec 9>/root/.android/avd/aiqa-node.lock
-flock -n 9 || { echo "AVD volume is already owned by another AIQA node" >&2; exit 1; }
-avd_dir=/root/.android/avd/aiqa-android.avd
+# 先通过 flock 独占模拟器 AVD 数据卷，再清理异常退出遗留的启动锁；否则可能误删另一节点正在使用的模拟器锁文件。
+exec 9>/root/.android/avd/testpilot-node.lock
+flock -n 9 || { echo "AVD volume is already owned by another TestPilot node" >&2; exit 1; }
+avd_dir=/root/.android/avd/testpilot-android.avd
 [[ "$(realpath "$avd_dir")" == "$avd_dir" ]] || { echo "Unexpected AVD directory" >&2; exit 1; }
 rm -rf -- "$avd_dir/hardware-qemu.ini.lock" "$avd_dir/multiinstance.lock"
 adb start-server
-emulator -avd aiqa-android -port 5554 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 1536 -cores 2 -camera-back none -camera-front none > /tmp/emulator.log 2>&1 &
+emulator -avd testpilot-android -port 5554 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 1536 -cores 2 -camera-back none -camera-front none > /tmp/emulator.log 2>&1 &
 emulator_pid=$!
 cleanup(){ trap - EXIT TERM INT; kill "$emulator_pid" "${appium_pid:-}" "${node_pid:-}" 2>/dev/null || true; wait "$emulator_pid" "${appium_pid:-}" "${node_pid:-}" 2>/dev/null || true; }
 trap cleanup EXIT
@@ -29,7 +29,7 @@ adb -s emulator-5554 shell input keyevent 82
 adb -s emulator-5554 install -r /opt/ApiDemos.apk
 python3 /opt/device-node.py & node_pid=$!
 appium --address 0.0.0.0 --port 4723 --log-timestamp --log-no-colors --log /tmp/appium.log & appium_pid=$!
-# Treat any critical process exiting as node failure; restart policy then restores the whole node.
+# emulator、Appium 或设备代理任一进程退出，都让本节点失败退出；Compose 重启策略随后重启整套节点，避免留下只有部分进程存活的假在线设备。
 set +e
 wait -n "$emulator_pid" "$appium_pid" "$node_pid"
 exit_code=$?

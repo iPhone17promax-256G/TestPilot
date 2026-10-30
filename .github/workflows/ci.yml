@@ -1,0 +1,53 @@
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: openssl version
+      - run: npm audit --audit-level=high
+      - run: npm test
+      - run: npm run build
+
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Start disposable platform
+        run: bash scripts/start.sh --local --rebuild
+      - name: Run isolated backend and frontend checks
+        run: python3 scripts/check.py
+      - name: Stop disposable platform
+        if: always()
+        run: bash scripts/stop.sh

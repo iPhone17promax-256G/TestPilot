@@ -16,8 +16,18 @@ build/
 htmlcov/
 
 .client/
+.tls/
 deploy/platform.env
 deploy/runtime.env
+deploy/package/install.env
+deploy/package/api.env
+deploy/package/executor.env
+deploy/package/test.env
+deploy/package/data/
+deploy/package/client/
+deploy/package/tls/
+deploy/package/images.tar.gz
+deploy/package/images.sha256
 releases/
 
 # 个人学习与面试讲解文档，仅本地保留

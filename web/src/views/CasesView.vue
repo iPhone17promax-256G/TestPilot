@@ -41,7 +41,7 @@ function protectReload(e:BeforeUnloadEvent){if(dirty.value){e.preventDefault();e
 onMounted(()=>window.addEventListener('beforeunload',protectReload));onUnmounted(()=>window.removeEventListener('beforeunload',protectReload))
 onBeforeRouteLeave(canLeave);onBeforeRouteUpdate(canLeave)
 const resultFilter=ref('all'),sort=ref('updated'),page=ref(1),pageSize=25
-const filterKey='aiqa-cases-filters:'+state.projectId
+const filterKey='testpilot-cases-filters:'+state.projectId
 try{const saved=JSON.parse(sessionStorage.getItem(filterKey)||'{}');query.value=saved.query||'';kind.value=saved.kind||'all';resultFilter.value=saved.result||'all';sort.value=saved.sort||'updated';showArchived.value=!!saved.archived;page.value=saved.page||1}catch{}
 watch([query,kind,resultFilter,sort,showArchived],()=>{page.value=1;persistFilters()})
 watch(page,persistFilters)

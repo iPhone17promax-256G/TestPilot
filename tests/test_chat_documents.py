@@ -8,13 +8,15 @@ from pypdf import PdfWriter
 from pypdf.generic import NameObject, DictionaryObject, DecodedStreamObject
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from aiqa.api import app
-from aiqa.config import settings
-from aiqa.documents import extract_document, validate_name, MAX_BYTES
-from aiqa.attachments import message_content
-from aiqa.storage import Record, Job, session, uid, now, read_record
-from aiqa.workspace import project_scope
-from aiqa import testing as t
+from testpilot.api import app
+from testpilot.config import settings
+from testpilot.documents import extract_document, validate_name, MAX_BYTES
+from testpilot.attachments import message_content
+from testpilot.job_queue import enqueue
+from queue_helpers import mark_running
+from testpilot.storage import Record, session, uid, now, read_record
+from testpilot.workspace import project_scope
+from testpilot import testing as t
 
 def pdf_bytes(text=None, encrypted=False):
     writer = PdfWriter()
@@ -57,16 +59,15 @@ def test_encrypted_pdf_and_broken_docx(tmp_path):
 @pytest.fixture
 def workspace(tmp_path,monkeypatch):
     monkeypatch.setattr(settings,"data",tmp_path)
-    client=TestClient(app,headers={"Authorization":"Bearer "+settings.access_token})
+    client=TestClient(app, base_url="https://testserver",headers={"Authorization":"Bearer "+settings.access_token})
     projects=[client.post("/api/projects",json={"name":"附件测试 "+x}).json()["id"] for x in ["A","B"]]
     yield client,projects
     with session() as db:
         for row in db.scalars(select(Record).where((Record.project_id.in_(projects)) | (Record.id.in_(projects)))):
-            for job in db.scalars(select(Job).where(Job.record_id==row.id)):db.delete(job)
             db.delete(row)
 
 def upload(client,project,name="需求.md",content="# 需求\nHTTP 200；status 为 OK".encode()):
-    return client.post("/api/attachments",params={"filename":name},headers={"X-AIQA-Project":project},content=content)
+    return client.post("/api/attachments",params={"filename":name},headers={"X-TestPilot-Project":project},content=content)
 
 def test_upload_preview_download_scope_and_paging(workspace):
     client,(a,b)=workspace
@@ -75,14 +76,14 @@ def test_upload_preview_download_scope_and_paging(workspace):
     assert response.status_code==201,response.text
     attachment=response.json();identity=attachment["id"]
     assert attachment["characters"]==len(text.strip()) and "textPath" not in attachment
-    first=client.get(f"/api/attachments/{identity}/text?limit=80",headers={"X-AIQA-Project":a}).json()
+    first=client.get(f"/api/attachments/{identity}/text?limit=80",headers={"X-TestPilot-Project":a}).json()
     assert first["content"]==text[:80] and first["nextOffset"]==80
-    second=client.get(f"/api/attachments/{identity}/text?offset=80&limit=80",headers={"X-AIQA-Project":a}).json()
+    second=client.get(f"/api/attachments/{identity}/text?offset=80&limit=80",headers={"X-TestPilot-Project":a}).json()
     assert second["content"]==text[80:160]
     assert client.get(attachment["downloadUrl"]).content==text.encode()
-    assert client.get(f"/api/attachments/{identity}/text",headers={"X-AIQA-Project":b}).status_code==404
-    assert TestClient(app).get(attachment["downloadUrl"]).status_code==401
-    assert client.get(f"/api/attachments/{identity}/text?limit=16001",headers={"X-AIQA-Project":a}).status_code==422
+    assert client.get(f"/api/attachments/{identity}/text",headers={"X-TestPilot-Project":b}).status_code==404
+    assert TestClient(app, base_url="https://testserver").get(attachment["downloadUrl"]).status_code==401
+    assert client.get(f"/api/attachments/{identity}/text?limit=16001",headers={"X-TestPilot-Project":a}).status_code==422
 
 def test_followup_attachment_persists_and_tool_is_conversation_bound(workspace):
     client,(a,b)=workspace
@@ -90,8 +91,9 @@ def test_followup_attachment_persists_and_tool_is_conversation_bound(workspace):
     identity=uid("TASK")
     with project_scope(a),session() as db:
         db.add(Record(id=identity,kind="task",status="running",payload=dict(id=identity,status="running",messages=[],events=[],runIds=[],caseIds=[],goal="原任务",createdAt=t.stamp())))
-        db.add(Job(id=uid("JOB"),kind="agent",record_id=identity,status="running",claim="test",lease=now()+timedelta(hours=1)))
-    headers={"X-AIQA-Project":a}
+        enqueue(db,db.get(Record,identity),"agent")
+    mark_running(identity)
+    headers={"X-TestPilot-Project":a}
     for _ in range(2):
         response=client.post(f"/api/tasks/{identity}/messages",headers=headers,json={"content":"按附件设计，别执行","attachment_ids":[file["id"]],"key":"same-document"})
         assert response.status_code==202,response.text
@@ -100,7 +102,7 @@ def test_followup_attachment_persists_and_tool_is_conversation_bound(workspace):
         assert len(read_record(identity)["messages"])==1
         assert message["attachments"][0]["id"]==file["id"]
         assert file["id"] in message_content(message)
-        assert "HTTP 200" not in message_content(message) # Body must be read by tool, not injected wholesale.
+        assert "HTTP 200" not in message_content(message) # 检查初始 Agent 上下文只包含附件索引而不含整份正文；正文应由 attachments_read 分页读取，避免需求文件自动占满每轮提示词。
         assert t.take_user_messages(identity)[0]["attachments"][0]["id"]==file["id"]
     result=client.post("/api/tools/attachments_read",headers=headers,json={"task_id":identity,"arguments":{"id":file["id"]}})
     assert result.status_code==200 and "status 为 OK" in result.json()["content"]
@@ -117,14 +119,15 @@ def test_attachment_only_message_and_rejections(workspace):
     assert upload(client,a,name="scan.pdf",content=pdf_bytes()).status_code==400
     assert upload(client,a,name="broken.docx",content=b"not a zip").status_code==400
     file=upload(client,a).json()
-    from aiqa.attachments import attachment_refs
+    from testpilot.attachments import attachment_refs
     with project_scope(a):
         with pytest.raises(ValueError):attachment_refs([file["id"]]*2)
         with pytest.raises(ValueError):t.task_message("missing","")
-        # Test start construction without queuing a real model call.
+        # 这里仅验证首条消息和附件引用的 Task 构造结果；用替身避免提交真实 Agent 作业，不调用模型供应商、不产生模型费用。
         env=t.environment_save("测试环境","http://target.test")
         collected=[]
         class FakeDB:
+            info={}
             def add(self,row):collected.append(row)
         original=t.mutate
         t.mutate=lambda scope,key,args,action:action(FakeDB())
@@ -141,5 +144,5 @@ def test_pdf_upload_through_bounded_parser(workspace):
     assert response.status_code==201,response.text
     attachment=response.json()
     assert attachment["pages"]==1
-    text=client.get(f"/api/attachments/{attachment['id']}/text",headers={"X-AIQA-Project":a}).json()
+    text=client.get(f"/api/attachments/{attachment['id']}/text",headers={"X-TestPilot-Project":a}).json()
     assert "PDF-OK-20261006" in text["content"]

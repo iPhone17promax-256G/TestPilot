@@ -3,55 +3,99 @@ x-logging: &bounded-logs
   driver: json-file
   options: {max-size: 10m, max-file: "3"}
 services:
+  qdrant:
+    logging: *bounded-logs
+    image: qdrant/qdrant:v1.16.3
+    environment: {QDRANT__SERVICE__API_KEY: "${TESTPILOT_QDRANT_API_KEY}"}
+    volumes: [knowledge:/qdrant/storage]
+    networks: [management]
+    mem_limit: 512m
+    restart: unless-stopped
+  redis:
+    logging: *bounded-logs
+    image: redis:7.4-alpine
+    environment: {REDIS_PASSWORD: "${TESTPILOT_REDIS_PASSWORD}"}
+    command: [sh, -c, 'exec redis-server --appendonly yes --appendfsync everysec --maxmemory 256mb --maxmemory-policy noeviction --requirepass "$$REDIS_PASSWORD"']
+    volumes: [queue:/data]
+    networks: [management]
+    restart: unless-stopped
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG']
+      interval: 3s
+      retries: 30
   mysql:
     logging: *bounded-logs
     image: mysql:8.4
     environment:
-      MYSQL_DATABASE: aiqa
-      MYSQL_USER: aiqa
-      MYSQL_PASSWORD: ${AIQA_DB_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${AIQA_DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: testpilot
+      MYSQL_USER: testpilot
+      MYSQL_PASSWORD: ${TESTPILOT_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${TESTPILOT_DB_ROOT_PASSWORD}
     volumes: [database:/var/lib/mysql]
     networks: [management]
     restart: unless-stopped
     healthcheck:
-      test: [CMD-SHELL, "MYSQL_PWD=$$MYSQL_PASSWORD mysql -h 127.0.0.1 -u aiqa aiqa -e 'SELECT 1' >/dev/null"]
+      test: [CMD-SHELL, "MYSQL_PWD=$$MYSQL_PASSWORD mysql -h 127.0.0.1 -u testpilot testpilot -e 'SELECT 1' >/dev/null"]
       interval: 3s
       retries: 40
   api:
     logging: *bounded-logs
-    image: ${AIQA_RELEASE_IMAGE}
+    image: ${TESTPILOT_RELEASE_IMAGE}
+    command: [python, -m, testpilot.serve]
     env_file: api.env
     environment:
-      AIQA_ROLE: platform
-      AIQA_DATA: /data
-      AIQA_MODEL_KEY: ''
-    volumes: [./data:/data]
-    ports: ["${AIQA_BIND}:${AIQA_PORT}:8020"]
+      TESTPILOT_ROLE: platform
+      TESTPILOT_RUNNER_IMAGE: ${TESTPILOT_RELEASE_IMAGE}
+      TESTPILOT_DATA: /data
+      TESTPILOT_MODEL_KEY: ''
+      TESTPILOT_RUNTIME_URL: https://executor:8021
+      TESTPILOT_TLS_CERT_FILE: /tls/platform.pem
+      TESTPILOT_TLS_KEY_FILE: /tls/platform-key.pem
+      SSL_CERT_FILE: /tls/ca-bundle.pem
+      REQUESTS_CA_BUNDLE: /tls/ca-bundle.pem
+    volumes:
+    - ./data:/data
+    - ${TESTPILOT_TLS_DIR:?请先生成本地HTTPS证书}/platform.pem:/tls/platform.pem:ro
+    - ${TESTPILOT_TLS_DIR:?请先生成本地HTTPS证书}/platform-key.pem:/tls/platform-key.pem:ro
+    - ${TESTPILOT_TLS_DIR:?请先生成本地HTTPS证书}/ca-bundle.pem:/tls/ca-bundle.pem:ro
+    ports: ["${TESTPILOT_BIND}:${TESTPILOT_PORT}:8020"]
     networks: [management, entry]
     depends_on:
+      qdrant: {condition: service_started}
       mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
     restart: unless-stopped
     mem_limit: 1g
   executor:
     logging: *bounded-logs
-    image: ${AIQA_RELEASE_IMAGE}
-    command: [python, -m, aiqa.local_executor]
+    image: ${TESTPILOT_RELEASE_IMAGE}
+    command: [python, -m, testpilot.local_executor]
     env_file:
     - path: test.env
       required: false
     - executor.env
     environment:
-      AIQA_ROLE: gateway
-      AIQA_PLATFORM_URL: http://api:8020
-      AIQA_CLIENT_BIND: 0.0.0.0
-      AIQA_CLIENT_ROOT: /client
-      AIQA_CLIENT_HOST_ROOT: ${AIQA_INSTALL_PATH}/client
-      AIQA_DATABASE_URL: sqlite:////client/gateway.sqlite
-      AIQA_DATA: /client/scratch
+      TESTPILOT_ROLE: gateway
+      TESTPILOT_PLATFORM_URL: https://api:8020
+      TESTPILOT_CLIENT_ORIGIN: https://127.0.0.1:${TESTPILOT_PORT}
+      TESTPILOT_TLS_CERT_FILE: /tls/executor.pem
+      TESTPILOT_TLS_KEY_FILE: /tls/executor-key.pem
+      SSL_CERT_FILE: /tls/ca-bundle.pem
+      REQUESTS_CA_BUNDLE: /tls/ca-bundle.pem
+      TESTPILOT_CLIENT_BIND: 0.0.0.0
+      TESTPILOT_CLIENT_ROOT: /client
+      TESTPILOT_CLIENT_HOST_ROOT: ${TESTPILOT_INSTALL_PATH}/client
+      TESTPILOT_DATABASE_URL: sqlite:////client/gateway.sqlite
+      TESTPILOT_DATA: /client/scratch
       BROWSER_USE_LOGGING_LEVEL: warning
     # 只有执行服务持有 Docker socket，API 和每个测试容器均不挂载。
-    volumes: [./client:/client, /var/run/docker.sock:/var/run/docker.sock]
+    volumes:
+    - ./client:/client
+    - /var/run/docker.sock:/var/run/docker.sock
+    - ${TESTPILOT_TLS_DIR:?请先生成本地HTTPS证书}/executor.pem:/tls/executor.pem:ro
+    - ${TESTPILOT_TLS_DIR:?请先生成本地HTTPS证书}/executor-key.pem:/tls/executor-key.pem:ro
+    - ${TESTPILOT_TLS_DIR:?请先生成本地HTTPS证书}/ca-bundle.pem:/tls/ca-bundle.pem:ro
     extra_hosts: [host.docker.internal:host-gateway]
     networks: [entry, targets]
     shm_size: 512mb
@@ -62,13 +106,13 @@ services:
   appium:
     logging: *bounded-logs
     profiles: [android]
-    image: ${AIQA_APPIUM_IMAGE}
+    image: ${TESTPILOT_APPIUM_IMAGE}
     container_name: ${COMPOSE_PROJECT_NAME}-appium-1
     entrypoint: /opt/start-appium.sh
     devices: [/dev/kvm:/dev/kvm]
     volumes: [android:/root/.android/avd, ./client/apks:/client/apks:ro]
     networks: [targets]
-    labels: {aiqa.component: app}
+    labels: {testpilot.component: app}
     shm_size: 512mb
     mem_limit: 4g
     cpus: 2
@@ -76,7 +120,9 @@ services:
 networks:
   management: {internal: true}
   entry: {}
-  targets: {name: "${AIQA_TARGET_NETWORK}"}
+  targets: {name: "${TESTPILOT_TARGET_NETWORK}"}
 volumes:
+  knowledge: {}
+  queue: {}
   database: {}
   android: {}

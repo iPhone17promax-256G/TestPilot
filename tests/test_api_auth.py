@@ -1,13 +1,13 @@
 import pytest
 from fastapi.testclient import TestClient
-from aiqa.api import app
-from aiqa.config import settings
+from testpilot.api import app
+from testpilot.config import settings
 
 
 @pytest.fixture(scope="module")
 def client():
-    # The MCP SDK manager owns one lifecycle per process, just like the API.
-    with TestClient(app) as instance:
+    # MCP SDK 会话管理器在一次进程生命周期内只启动一次；测试与平台 API 一样，在测试应用的启动/退出阶段管理它，不对每个请求重建管理器。
+    with TestClient(app, base_url="https://testserver") as instance:
         yield instance
 
 

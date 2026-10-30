@@ -1,5 +1,5 @@
 {
-  "description": "AIQA 真实执行记录；GIF 为页面回放，非连续实时录屏。仅导出公开 MM 演示用例，不包含模型 Key、平台 Token 或账号配置。",
+  "description": "TestPilot 真实执行记录；GIF 为页面回放，非连续实时录屏。仅导出公开 MM 演示用例，不包含模型 Key、平台 Token 或账号配置。",
   "tasks": [
     {
       "id": "TASK-975F7A4F8A11",
@@ -214,7 +214,7 @@
     },
     {
       "id": "TASK-8AA232ACC9CA",
-      "goal": "测试 MM 登录页，使用不存在账号 aiqa_missing_account 和无效密码 dummy-invalid-password，确认提交后出现错误提示且仍在登录页；不要假定具体错误文案。保存名为“MM · 1006 错误账号页面验证”的用例并执行，查看截图和报告告诉我结果。",
+      "goal": "测试 MM 登录页，使用不存在账号 testpilot_missing_account 和无效密码 dummy-invalid-password，确认提交后出现错误提示且仍在登录页；不要假定具体错误文案。保存名为“MM · 1006 错误账号页面验证”的用例并执行，查看截图和报告告诉我结果。",
       "status": "completed",
       "rounds": 28,
       "createdAt": "2026-10-06T10:52:00Z",
@@ -624,7 +624,7 @@
                   "items": null,
                   "query": "path",
                   "state": "visible",
-                  "value": "aiqa_missing_account",
+                  "value": "testpilot_missing_account",
                   "action": "fill",
                   "method": "GET",
                   "params": {},
@@ -1255,7 +1255,7 @@
                   "items": null,
                   "query": "path",
                   "state": "visible",
-                  "value": "aiqa_missing_account",
+                  "value": "testpilot_missing_account",
                   "action": "fill",
                   "method": "GET",
                   "params": {},
@@ -1886,7 +1886,7 @@
                   "items": null,
                   "query": "path",
                   "state": "visible",
-                  "value": "aiqa_missing_account",
+                  "value": "testpilot_missing_account",
                   "action": "fill",
                   "method": "GET",
                   "params": {},
@@ -2517,7 +2517,7 @@
                   "items": null,
                   "query": "path",
                   "state": "visible",
-                  "value": "aiqa_missing_account",
+                  "value": "testpilot_missing_account",
                   "action": "fill",
                   "method": "GET",
                   "params": {},
@@ -3148,7 +3148,7 @@
                   "items": null,
                   "query": "path",
                   "state": "visible",
-                  "value": "aiqa_missing_account",
+                  "value": "testpilot_missing_account",
                   "action": "fill",
                   "method": "GET",
                   "params": {},
@@ -3897,7 +3897,7 @@
       ],
       "userMessages": [
         {
-          "content": "测试 MM 登录页，使用不存在账号 aiqa_missing_account 和无效密码 dummy-invalid-password，确认提交后出现错误提示且仍在登录页；不要假定具体错误文案。保存名为“MM · 1006 错误账号页面验证”的用例并执行，查看截图和报告告诉我结果。",
+          "content": "测试 MM 登录页，使用不存在账号 testpilot_missing_account 和无效密码 dummy-invalid-password，确认提交后出现错误提示且仍在登录页；不要假定具体错误文案。保存名为“MM · 1006 错误账号页面验证”的用例并执行，查看截图和报告告诉我结果。",
           "createdAt": "2026-10-06T10:52:00Z"
         },
         {

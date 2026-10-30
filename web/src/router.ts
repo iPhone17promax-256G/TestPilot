@@ -19,7 +19,7 @@ export const router = createRouter({
 // A deploy changes hashed chunk URLs. Route guards already handle unsaved changes.
 router.onError((error,to)=>{
   if(/Failed to fetch dynamically imported module|Importing a module script failed|Loading chunk/.test(String(error))){
-    const key='aiqa-chunk-reload:'+to.fullPath
+    const key='testpilot-chunk-reload:'+to.fullPath
     if(!sessionStorage.getItem(key)){sessionStorage.setItem(key,'1');window.location.assign(to.fullPath)}
   }
 })

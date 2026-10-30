@@ -3,11 +3,11 @@ import json
 import xml.etree.ElementTree as ET
 import httpx
 import pytest
-from aiqa.steps import compile_steps_details, validate_steps
-from aiqa.authoring import native_fallback, visual_authoring
-from aiqa.tools import SaveVisualCase
-from aiqa.step_catalog import capabilities, catalog
-from aiqa.runners import visual_runtime as runtime
+from testpilot.steps import compile_steps_details, validate_steps
+from testpilot.authoring import native_fallback, visual_authoring
+from testpilot.tools import SaveVisualCase
+from testpilot.step_catalog import capabilities, catalog
+from testpilot.runners import visual_runtime as runtime
 
 
 def execute(kind, steps, **fixtures):
@@ -18,7 +18,7 @@ def execute(kind, steps, **fixtures):
 
 @pytest.fixture
 def report(tmp_path,monkeypatch):
-    from aiqa.runners import steps
+    from testpilot.runners import steps
     original=runtime.StepRuntime
     monkeypatch.setattr(steps,"StepRuntime",lambda *args,**kwargs:original(*args,report_path=str(tmp_path/"steps.json"),**kwargs))
     return tmp_path/"steps.json"
@@ -41,21 +41,21 @@ def test_api_nested_branches_loops_and_generated_report(report,monkeypatch):
         {"action":"end"},{"action":"end"},
         {"action":"repeat","count":2,"enabled":False},{"action":"request","path":"/disabled"},{"action":"end"},
     ],base_url="http://target.test")
-    # Variable path must resolve to a relative path, without accidental double slash.
+    # 检查请求路径中的变量替换后仍得到相对路径，拼接 base_url 时不能出现多余斜杠或改变目标地址。
     assert seen==["/one","/one","/two","/two"]
     rows=json.loads(report.read_text())
     assert any(r["name"]=="步骤 7" and r["status"]=="skipped" for r in rows)
     assert any(r.get("conditionMatched") is True for r in rows)
-    assert len(mapping)==13 and "if _aiqa_condition_" in source
+    assert len(mapping)==13 and "if _testpilot_condition_" in source
     assert len([r for r in rows if r["action"]=="request" and r["status"]=="passed"])==4
 
 
 def test_api_false_branch_and_multipart(report,monkeypatch,tmp_path):
-    (tmp_path/"hello.txt").write_text("AIQA multipart")
+    (tmp_path/"hello.txt").write_text("TestPilot multipart")
     monkeypatch.chdir(tmp_path);seen=[]
     def target(request):
         seen.append(request)
-        assert b"AIQA multipart" in request.content and b'name="title"' in request.content
+        assert b"TestPilot multipart" in request.content and b'name="title"' in request.content
         return httpx.Response(201,json={"uploaded":True})
     client=httpx.Client
     monkeypatch.setattr(runtime.httpx,"Client",lambda **kw:client(transport=httpx.MockTransport(target),**kw))
@@ -121,16 +121,16 @@ def test_browser_branch_tabs_download_and_scroll(report,tmp_path):
         browser=p.chromium.launch(executable_path="/usr/lib/chromium/chromium",args=["--no-sandbox"])
         context=browser.new_context(accept_downloads=True)
         page=context.new_page()
-        page.context.route("http://target.test/**",lambda route:route.fulfill(content_type="text/html",body="""<button id=popup onclick="window.open('/detail')">Open</button><a id=download download=demo.txt href='data:text/plain,AIQA%20download'>Download</a><p id=content>AIQA page</p>"""))
-        source,mapping=execute("web",[{"action":"goto","path":"/"},{"action":"if","source":"element","selector":"#missing","timeout":100},{"action":"click","selector":"#missing"},{"action":"else"},{"action":"assert_text","selector":"#content","value":"AIQA"},{"action":"end"},{"action":"click_popup","selector":"#popup","tab":"detail"},{"action":"assert_text","selector":"#content","value":"AIQA"},{"action":"close_tab","tab":"detail"},{"action":"download","selector":"#download","value":"download.txt"},{"action":"open_tab","tab":"second","path":"/other"},{"action":"switch_tab","tab":"main"},{"action":"scroll","selector":"#content"},{"action":"reload"},{"action":"assert_visible","selector":"#content"}],page=page,base_url="http://target.test")
-        assert (tmp_path/"download.txt").read_text()=="AIQA download"
+        page.context.route("http://target.test/**",lambda route:route.fulfill(content_type="text/html",body="""<button id=popup onclick="window.open('/detail')">Open</button><a id=download download=demo.txt href='data:text/plain,TestPilot%20download'>Download</a><p id=content>TestPilot page</p>"""))
+        source,mapping=execute("web",[{"action":"goto","path":"/"},{"action":"if","source":"element","selector":"#missing","timeout":100},{"action":"click","selector":"#missing"},{"action":"else"},{"action":"assert_text","selector":"#content","value":"TestPilot"},{"action":"end"},{"action":"click_popup","selector":"#popup","tab":"detail"},{"action":"assert_text","selector":"#content","value":"TestPilot"},{"action":"close_tab","tab":"detail"},{"action":"download","selector":"#download","value":"download.txt"},{"action":"open_tab","tab":"second","path":"/other"},{"action":"switch_tab","tab":"main"},{"action":"scroll","selector":"#content"},{"action":"reload"},{"action":"assert_visible","selector":"#content"}],page=page,base_url="http://target.test")
+        assert (tmp_path/"download.txt").read_text()=="TestPilot download"
         assert len(page.context.pages)==2
         browser.close()
     assert len(mapping)==15 and all(r["status"] in {"passed","skipped"} for r in json.loads(report.read_text()))
 
 
 def test_capability_catalog_covers_actual_actions():
-    from aiqa.steps import ACTIONS
+    from testpilot.steps import ACTIONS
     for kind,actions in ACTIONS.items():
         assert {item["action"] for item in catalog()[kind]}==actions
         result=capabilities(kind)
@@ -141,14 +141,14 @@ def test_capability_catalog_covers_actual_actions():
 def test_http_agent_cannot_bypass_visual_policy_and_fallback_is_saved():
     from fastapi.testclient import TestClient
     from sqlalchemy import select
-    from aiqa.api import app
-    from aiqa.config import settings
-    from aiqa.storage import Record,Mutation,session,uid
-    from aiqa.agent import permissions
-    from aiqa.workspace import project_scope
-    client=TestClient(app,headers={"Authorization":"Bearer "+settings.access_token})
+    from testpilot.api import app
+    from testpilot.config import settings
+    from testpilot.storage import Record,Mutation,session,uid
+    from testpilot.agent import permissions
+    from testpilot.workspace import project_scope
+    client=TestClient(app, base_url="https://testserver",headers={"Authorization":"Bearer "+settings.access_token})
     project=client.post("/api/projects",json={"name":"可视化策略测试临时项目"}).json()["id"]
-    headers={"X-AIQA-Project":project};task=uid("TASK")
+    headers={"X-TestPilot-Project":project};task=uid("TASK")
     try:
         with session() as db:db.add(Record(id=task,kind="task",project_id=project,payload={"id":task,"status":"completed","permissionMode":"bypass","goal":"检查健康接口","messages":[{"role":"user","content":"检查健康接口","delivered":True}],"caseIds":[],"runIds":[]}))
         def authorized_post(name,arguments):
@@ -169,7 +169,7 @@ def test_http_agent_cannot_bypass_visual_policy_and_fallback_is_saved():
         args["fallback"]={"mode":"user_requested","reason":"用户本轮明确指定要查看原生脚本演示","user_quote":"用原生脚本"}
         saved=authorized_post("cases_save_script",args)
         assert saved.status_code==200 and saved.json()["revisions"][-1]["fallback"]["policy"]=="visual-first-v1"
-        # Manual imports remain available; this policy belongs to the built-in Agent.
+        # 检查用户手工导入的原生脚本仍可保存；可视化优先的额外限制针对内置 Agent，不把同样限制无条件施加到手工导入入口。
         manual=client.post("/api/tools/cases_save_revision",headers=headers,json={"arguments":{"name":"import","kind":"api","code":"def test_import(): pass"}})
         assert manual.status_code==200 and manual.json()["revisions"][-1]["mode"]=="script"
     finally:
@@ -179,8 +179,8 @@ def test_http_agent_cannot_bypass_visual_policy_and_fallback_is_saved():
 
 
 def test_nested_data_templates_and_script_schema_are_unambiguous():
-    from aiqa.runners.steps import substitute
-    from aiqa.tools import SaveScriptCase
+    from testpilot.runners.steps import substitute
+    from testpilot.tools import SaveScriptCase
     values={"item":{"name":"tester","ids":[3,4]}}
     assert substitute("{{item.name}}",values)=="tester"
     assert substitute("id={{item.ids[1]}}",values)=="id=4"
@@ -190,7 +190,7 @@ def test_nested_data_templates_and_script_schema_are_unambiguous():
 
 
 def test_jmeter_conditional_blocks_compile_both_branches():
-    from aiqa.visual_performance import jmeter_condition
+    from testpilot.visual_performance import jmeter_condition
     steps=[{"action":"if","source":"variable","expression":"state","expected":"OK"},{"action":"request","path":"/good"},{"action":"else"},{"action":"request","path":"/bad"},{"action":"end"}]
     _,source,mapping=compile_steps_details("performance",steps)
     root=ET.fromstring(source);controllers=root.findall(".//IfController")
@@ -263,9 +263,9 @@ def test_disabled_control_keeps_editable_incomplete_steps_without_requiring_file
     _,source,mapping=compile_steps_details("web",steps)
     ast.parse(source)
     assert len(mapping)==5
-    from aiqa.testing import case_save
-    from aiqa.storage import Record,session
-    from aiqa.workspace import project_scope
+    from testpilot.testing import case_save
+    from testpilot.storage import Record,session
+    from testpilot.workspace import project_scope
     with project_scope("PROJECT"):
         saved=case_save("自检 · 关闭块内未配置上传", "web", "", steps=steps)
         try:
@@ -273,7 +273,7 @@ def test_disabled_control_keeps_editable_incomplete_steps_without_requiring_file
         finally:
             with session() as db:db.delete(db.get(Record,saved["id"]))
             import shutil
-            from aiqa.config import settings
+            from testpilot.config import settings
             root=(settings.data/"cases").resolve()
             folder=(root/saved["id"]).resolve()
             assert folder.parent==root and saved["id"].startswith("TC-")

@@ -1,15 +1,18 @@
 [build-system]
-requires = ["setuptools>=75"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "aiqa"
-version = "0.1.0"
+name = "testpilot"
+version = "0.2.0"
 description = "Executable testing assets and a persistent testing agent"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115,<1", "uvicorn>=0.30,<1", "sqlalchemy>=2.0,<3",
-  "pymysql[rsa]>=1.1,<2", "httpx>=0.28,<1", "pydantic-settings>=2.7,<3",
+  "pymysql[rsa]>=1.1,<2", "redis>=6.4,<7", "httpx>=0.28,<1", "pydantic-settings>=2.7,<3",
   "docker>=7.1,<8", "typer>=0.15,<1", "mcp>=1.20,<2",
   "langchain>=1.0,<2", "langchain-openai>=1.0,<2",
   "langgraph-checkpoint-sqlite>=3,<4", "langgraph-checkpoint-mysql[pymysql]>=2,<4", "browser-use>=0.11,<1",
@@ -18,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-aiqa = "aiqa.integrations.cli:app"
+testpilot = "testpilot.integrations.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]

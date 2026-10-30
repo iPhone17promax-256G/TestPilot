@@ -5,6 +5,7 @@
 模型替身不访问供应商、不消耗真实 Key，不能据此声称验证了某个真实 LLM 的能力。
 """
 import json
+import ssl
 import subprocess
 import time
 import urllib.request
@@ -34,16 +35,28 @@ HTTPServer(('0.0.0.0',8089),Handler).serve_forever()
 '''
 
 
+# 功能：在双模式验收脚本中执行 Docker CLI。
+# 输入：args 是逐项命令参数，由本脚本固定验收步骤构造。
+# 输出/影响：返回 CompletedProcess，失败抛异常；执行的命令可能创建/连网/删除验收容器，标准输出被丢弃。
 def docker(*args):return subprocess.run(['docker',*args],check=True,stdout=subprocess.DEVNULL)
 
 
+# 功能：验收独立安装的本地或服务端模式。
+# 输入：mode 是 local/server，port 是该验收安装的 HTTPS 端口。
+# 输出/影响：实际保存并执行 MM API/Web/JMeter 用例，使用受控模型验证 Agent 多轮与续聊，返回运行 ID/任务 ID/环境报告；不能据此声称验证真实模型能力。
 def verify(mode,port):
-    base=f'http://127.0.0.1:{port}'
+    base=f'https://127.0.0.1:{port}'
+    # 两个独立安装各有自己的本地 CA；必须验证对应证书，不能为验收关闭 TLS 校验。
+    ca_bundle=ROOT/'releases'/('acceptance-'+mode)/'tls/ca-bundle.pem'
+    context=ssl.create_default_context(cafile=str(ca_bundle))
     cookies=urllib.request.HTTPCookieProcessor(__import__('http.cookiejar',fromlist=['CookieJar']).CookieJar())
-    client=urllib.request.build_opener(cookies)
+    client=urllib.request.build_opener(cookies,urllib.request.HTTPSHandler(context=context))
+    # 功能：在单次部署验收中发送带 Cookie 的平台请求。
+    # 输入：path 是 API 子路径，body 是可选 JSON；base/client 由外层 verify 闭包提供。
+    # 输出/影响：返回解析的 JSON；登录 Cookie 随 client 保存复用，写接口会产生该验收安装的记录。
     def req(path,body=None):
         raw=json.dumps(body).encode() if body is not None else None
-        with client.open(urllib.request.Request(base+'/api'+path,data=raw,headers={'Content-Type':'application/json','X-AIQA-Project':'PROJECT'}),timeout=75) as response:return json.load(response)
+        with client.open(urllib.request.Request(base+'/api'+path,data=raw,headers={'Content-Type':'application/json','X-TestPilot-Project':'PROJECT'}),timeout=75) as response:return json.load(response)
     me=req('/auth/me');assert me['deploymentMode']==mode
     if mode=='server':
         if me['setupRequired']:req('/auth/setup',dict(username='acceptance_admin',password='DisposableDemo2026!'))
@@ -66,8 +79,8 @@ def verify(mode,port):
          {'action':'if','source':'element','by':'role','role':'link','selector':'View in Browser','timeout':5000},
          {'action':'click','by':'role','role':'link','selector':'View in Browser'},{'action':'end'},
          {'action':'assert_visible','selector':'#input_loginId'},{'action':'assert_visible','selector':'#input_password-input'},
-         {'action':'fill','selector':'#input_loginId','value':'aiqa-deployment-check'},
-         {'action':'assert_value','selector':'#input_loginId','value':'aiqa-deployment-check'},
+         {'action':'fill','selector':'#input_loginId','value':'testpilot-deployment-check'},
+         {'action':'assert_value','selector':'#input_loginId','value':'testpilot-deployment-check'},
          {'action':'assert_enabled','selector':'#saveSetting'}],{}),
       ('performance',requests,dict(users=1,duration_seconds=3,ramp_seconds=0,p95_ms=1000,max_error_rate=0))]
     run_ids=[]
@@ -96,18 +109,21 @@ def verify(mode,port):
     return dict(mode=mode,caseRuns=run_ids,taskId=task['id'],environment=probe)
 
 
+# 功能：组织两套独立安装的自动验收与清理。
+# 输入：无参数；ROOT 和受控模型程序来自脚本全局配置，目标是固定验收端口。
+# 输出/影响：写临时模型脚本/验收结果 JSON，创建并最终删除模型替身容器，连接验收网络；不调用真实供应商。
 def main():
     path=ROOT/'.client/acceptance-model.py';path.write_text(MODEL_PROGRAM)
-    docker('run','-d','--name','aiqa-deployment-model-check','--network','aiqa-local-check_entry','--network-alias','model-probe','-v',str(path)+':/probe.py:ro','aiqa-runtime:0.2','python','/probe.py')
-    docker('network','connect','--alias','model-probe','aiqa-server-check_entry','aiqa-deployment-model-check')
-    for name in ['aiqa-local-check','aiqa-server-check']:
+    docker('run','-d','--name','testpilot-deployment-model-check','--network','testpilot-local-check_entry','--network-alias','model-probe','-v',str(path)+':/probe.py:ro','testpilot-runtime:0.2','python','/probe.py')
+    docker('network','connect','--alias','model-probe','testpilot-server-check_entry','testpilot-deployment-model-check')
+    for name in ['testpilot-local-check','testpilot-server-check']:
         networks=json.loads(subprocess.check_output(['docker','inspect','-f','{{json .NetworkSettings.Networks}}','mm-test-app'],text=True))
         if name+'-targets' not in networks:docker('network','connect','--alias','mm-target',name+'-targets','mm-test-app')
     try:
         rows=[verify('local',8032),verify('server',8033)]
         (ROOT/'.client/deployment-acceptance.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2))
     finally:
-        docker('rm','-f','aiqa-deployment-model-check')
+        docker('rm','-f','testpilot-deployment-model-check')
     print('双模式成品包验收通过。')
 
 

@@ -1,26 +1,78 @@
 <script setup lang="ts">
 import {ref,onMounted,onBeforeUnmount} from 'vue'
+import {onBeforeRouteLeave} from 'vue-router'
 import AppModal from '../components/AppModal.vue'
 import AppIcon from '../components/AppIcon.vue'
 import {dateTime} from '../uiHelpers'
-import {state,request,refresh,notify} from '../store'
+import {state,ui,request,refresh,notify} from '../store'
 const tab=ref('devices'),checking=ref(''),deviceDetails=ref(''),appDetails=ref('')
 function observe(id:string){deviceId.value=id;observeOpen.value=true}
 function ownerLink(owner:string){return state.runs.some(r=>r.id===owner)?'/runs/'+owner:state.tasks.some(t=>t.id===owner)?'/agent/'+owner:''}
-const deviceOpen=ref(false),appOpen=ref(false),observeOpen=ref(false),busy=ref(false)
+const deviceOpen=ref(false),appOpen=ref(false),observeOpen=ref(false),busy=ref(false),closing=ref(false)
 const device=ref({name:'',udid:'emulator-5554',appium_url:'http://appium:4723',node_url:'http://appium:4724',device_id:''})
 const application=ref({name:'',package:'',activity:'',version:'',file:null as File|null})
 const deviceId=ref(''),appId=ref(''),session=ref(''),source=ref(''),image=ref(''),by=ref('accessibility id'),selector=ref(''),text=ref('')
 async function saveDevice(){try{await request('/devices',device.value);await refresh(true);deviceOpen.value=false;notify('设备配置已保存')}catch(e){notify(String(e))}}
 async function check(id:string){checking.value=id;try{await request('/devices/'+id+'/check',{});await refresh(true)}catch(e){notify(String(e))}finally{checking.value=''}}
 function fileSelected(e:Event){application.value.file=(e.target as HTMLInputElement).files?.[0]??null}
-async function saveApp(){busy.value=true;try{if(application.value.file){const params=new URLSearchParams({name:application.value.name,package:application.value.package,activity:application.value.activity,version:application.value.version});const response=await fetch('/api/applications/upload?'+params,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:application.value.file});const value=await response.json();if(!response.ok)throw new Error(value.message??value.detail)}else await request('/applications',{...application.value,version:application.value.version||'installed'});await refresh(true);appOpen.value=false;notify('应用版本已保存')}catch(e){notify(String(e))}finally{busy.value=false}}
-async function action(action:string){busy.value=true;try{const value=await request('/tools/mobile_action',{arguments:{action,session_id:session.value,device_id:deviceId.value,app_id:appId.value,by:by.value,selector:selector.value,text:text.value}});if(value.session_id)session.value=value.session_id;if(value.image){image.value='data:image/png;base64,'+value.image;source.value=value.source}if(action==='open')await actionObserve();await refresh(true)}catch(e){const message=String(e);notify(message);if(message.includes('超时')||message.includes('已关闭')){session.value='';source.value='';image.value=''}}finally{busy.value=false}}
-async function actionObserve(){const value=await request('/tools/mobile_action',{arguments:{action:'observe',session_id:session.value}});image.value='data:image/png;base64,'+value.image;source.value=value.source}
-async function close(){if(busy.value)return notify('等待当前设备操作完成');if(session.value){try{await request('/tools/mobile_action',{arguments:{action:'close',session_id:session.value}})}catch(e){notify(String(e))}}session.value='';observeOpen.value=false;await refresh(true)}
+async function saveApp(){busy.value=true;try{if(application.value.file){const params=new URLSearchParams({name:application.value.name,package:application.value.package,activity:application.value.activity,version:application.value.version});const response=await fetch('/api/applications/upload?'+params,{method:'POST',headers:{'X-TestPilot-Project':state.projectId,'Content-Type':'application/octet-stream'},body:application.value.file});const value=await response.json();if(!response.ok)throw new Error(value.message??value.detail)}else await request('/applications',{...application.value,version:application.value.version||'installed'});await refresh(true);appOpen.value=false;notify('应用版本已保存')}catch(e){notify(String(e))}finally{busy.value=false}}
+let mobileOperation:Promise<void>|undefined,closePromise:Promise<boolean>|undefined,disposed=false,sessionProjectId=''
+function clearSession(){session.value='';source.value='';image.value='';sessionProjectId=''}
+async function mobileRequest(args:Record<string,unknown>){
+ // 项目切换可能直接卸载页面；旧设备会话仍需按打开时的项目释放。
+ const response=await fetch('/api/tools/mobile_action',{method:'POST',headers:{'X-TestPilot-Project':sessionProjectId||state.projectId,'Content-Type':'application/json'},body:JSON.stringify({arguments:args})})
+ const value=await response.json()
+ if(response.status===401){ui.authRequired=true;ui.initialized=false}
+ if(!response.ok)throw new Error(value.message||value.detail||`HTTP ${response.status}`)
+ return value
+}
+async function action(kind:string,quiet=false){
+ if(disposed||closing.value||busy.value||(quiet&&mobileOperation))return
+ if(kind==='open')sessionProjectId=state.projectId
+ const previous=mobileOperation
+ const args={action:kind,session_id:session.value,device_id:deviceId.value,app_id:appId.value,by:by.value,selector:selector.value,text:text.value}
+ if(!quiet)busy.value=true
+ const operation=(async()=>{
+  if(previous)await previous
+  if(disposed||closing.value)return
+  try{
+   const value=await mobileRequest(args)
+   if(value.session_id)session.value=value.session_id
+   if(!disposed&&!closing.value){
+    if(value.image){image.value='data:image/png;base64,'+value.image;source.value=value.source}
+    if(kind==='open')await actionObserve()
+    if(!quiet&&!disposed&&!closing.value)await refresh(true)
+   }
+  }catch(e){
+   const message=String(e);notify(message)
+   if(message.includes('设备会话已超时')||message.includes('设备会话已关闭'))clearSession()
+  }finally{if(!quiet&&!closing.value)busy.value=false}
+ })()
+ mobileOperation=operation
+ try{await operation}finally{if(mobileOperation===operation)mobileOperation=undefined}
+}
+async function actionObserve(){const value=await mobileRequest({action:'observe',session_id:session.value});image.value='data:image/png;base64,'+value.image;source.value=value.source}
+async function close(){
+ if(closePromise)return closePromise
+ closing.value=true;busy.value=true
+ const pending=mobileOperation
+ const operation=(async()=>{
+  if(pending)await pending
+  if(session.value){
+   try{await mobileRequest({action:'close',session_id:session.value})}
+   catch(e){notify(String(e));return false}
+  }
+  clearSession();observeOpen.value=false
+  if(!disposed)await refresh(true)
+  return true
+ })()
+ closePromise=operation
+ try{return await operation}finally{closePromise=undefined;closing.value=false;busy.value=false}
+}
 let heartbeat:ReturnType<typeof setInterval>|undefined
-onMounted(()=>{heartbeat=setInterval(()=>{if(observeOpen.value&&session.value&&!busy.value&&document.visibilityState==='visible')void action('observe')},30000)})
-onBeforeUnmount(()=>{if(heartbeat)clearInterval(heartbeat);if(session.value)void close()})
+onMounted(()=>{heartbeat=setInterval(()=>{if(observeOpen.value&&session.value&&document.visibilityState==='visible')void action('observe',true)},30000)})
+onBeforeRouteLeave(()=>session.value||mobileOperation?close():true)
+onBeforeUnmount(()=>{disposed=true;if(heartbeat)clearInterval(heartbeat);if(session.value||mobileOperation)void close()})
 </script>
 <template><div class="page"><div class="page-heading"><div><h1>应用与设备</h1><p>管理 Android 设备与应用版本，连接后即可观察和测试。</p></div><div class="heading-actions"><button class="button secondary" @click="deviceOpen=true">添加设备</button><button class="button primary" @click="appOpen=true">添加应用版本</button></div></div>
 <div class="local-tabs" role="tablist" aria-label="设备与应用分类"><button role="tab" :aria-selected="tab==='devices'" :class="{active:tab==='devices'}" @click="tab='devices'">测试设备 <span>{{state.devices.length}}</span></button><button role="tab" :aria-selected="tab==='apps'" :class="{active:tab==='apps'}" @click="tab='apps'">应用版本 <span>{{state.applications.length}}</span></button></div>

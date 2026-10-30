@@ -5,17 +5,19 @@ import pytest
 import httpx
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
-from aiqa.api import app
-from aiqa.config import settings
-from aiqa.storage import Record, Job, User, LoginSession, ApiToken, session, uid, now, read_record
-from aiqa.authentication import password_hash
-from aiqa.workspace import project_scope
-from aiqa import testing as t
-from aiqa.steps import compile_steps, validate_steps
+from testpilot.api import app
+from testpilot.config import settings
+from testpilot.storage import Record, User, LoginSession, ApiToken, session, uid, now, read_record
+from testpilot.authentication import password_hash
+from testpilot.workspace import project_scope
+from testpilot import testing as t
+from testpilot.job_queue import enqueue
+from queue_helpers import mark_running
+from testpilot.steps import compile_steps, validate_steps
 
 @pytest.fixture(scope="module")
 def client():
-    yield TestClient(app,headers={"Authorization":"Bearer "+settings.access_token})
+    yield TestClient(app, base_url="https://testserver",headers={"Authorization":"Bearer "+settings.access_token})
 
 @pytest.fixture
 def projects(client):
@@ -27,36 +29,36 @@ def projects(client):
     yield identities
     with session() as db:
         for row in db.scalars(select(Record).where((Record.project_id.in_(identities)) | (Record.id.in_(identities)))):
-            for job in db.scalars(select(Job).where(Job.record_id==row.id)):db.delete(job)
             db.delete(row)
 
 def test_project_boundaries_and_idempotency(client,projects):
     a,b=projects
     body={"arguments":{"name":"隔离用例","kind":"api","steps":[{"action":"request","path":"/"}]},"key":"same-key"}
-    ra=client.post("/api/tools/cases_save_revision",headers={"X-AIQA-Project":a},json=body)
-    rb=client.post("/api/tools/cases_save_revision",headers={"X-AIQA-Project":b},json=body)
+    ra=client.post("/api/tools/cases_save_revision",headers={"X-TestPilot-Project":a},json=body)
+    rb=client.post("/api/tools/cases_save_revision",headers={"X-TestPilot-Project":b},json=body)
     assert ra.status_code==rb.status_code==200
     assert ra.json()["id"]!=rb.json()["id"]
-    state=client.get("/api/state",headers={"X-AIQA-Project":b}).json()
+    state=client.get("/api/state",headers={"X-TestPilot-Project":b}).json()
     assert [c["id"] for c in state["cases"]]==[rb.json()["id"]]
-    denied=client.post("/api/tools/cases_read",headers={"X-AIQA-Project":b},json={"arguments":{"id":ra.json()["id"]}})
+    denied=client.post("/api/tools/cases_read",headers={"X-TestPilot-Project":b},json={"arguments":{"id":ra.json()["id"]}})
     assert denied.status_code==404
     body["arguments"]["case_id"]=ra.json()["id"]
-    assert client.post("/api/tools/cases_save_revision",headers={"X-AIQA-Project":b},json=body).status_code==404
+    assert client.post("/api/tools/cases_save_revision",headers={"X-TestPilot-Project":b},json=body).status_code==404
 
 def test_environment_cannot_cross_projects(client,projects):
     a,b=projects
-    environment=client.post("/api/environments",headers={"X-AIQA-Project":a},json={"name":"A","url":"http://target.test"}).json()
-    case=client.post("/api/tools/cases_save_revision",headers={"X-AIQA-Project":b},json={"arguments":{"name":"B","kind":"api","steps":[{"action":"request","path":"/"}]}}).json()
-    response=client.post("/api/runs",headers={"X-AIQA-Project":b},json={"case_id":case["id"],"revision_number":1,"environment_id":environment["id"]})
+    environment=client.post("/api/environments",headers={"X-TestPilot-Project":a},json={"name":"A","url":"http://target.test"}).json()
+    case=client.post("/api/tools/cases_save_revision",headers={"X-TestPilot-Project":b},json={"arguments":{"name":"B","kind":"api","steps":[{"action":"request","path":"/"}]}}).json()
+    response=client.post("/api/runs",headers={"X-TestPilot-Project":b},json={"case_id":case["id"],"revision_number":1,"environment_id":environment["id"]})
     assert response.status_code==404
 
 def test_running_conversation_accepts_idempotent_followup(client,projects):
     project=projects[0];identity=uid("TASK")
     with project_scope(project),session() as db:
         db.add(Record(id=identity,kind="task",status="running",payload=dict(id=identity,status="running",messages=[],events=[],runIds=[],caseIds=[],goal="原任务",createdAt=t.stamp())))
-        db.add(Job(id=uid("JOB"),kind="agent",record_id=identity,status="running",claim="test",lease=now()+timedelta(hours=1)))
-    headers={"X-AIQA-Project":project}
+        enqueue(db,db.get(Record,identity),"agent")
+    mark_running(identity)
+    headers={"X-TestPilot-Project":project}
     for _ in range(2):
         response=client.post(f"/api/tasks/{identity}/messages",headers=headers,json={"content":"先别执行，解释一下","key":"follow-up"})
         assert response.status_code==202
@@ -81,7 +83,7 @@ def test_real_account_session_and_logout(client):
     user_id=uid("USER");username="test_"+user_id[-8:];password="AcceptanceOnly2026!"
     with session() as db:db.add(User(id=user_id,username=username,password_hash=password_hash(password)))
     try:
-        anonymous=TestClient(app)
+        anonymous=TestClient(app, base_url="https://testserver")
         assert anonymous.get("/api/state").status_code==401
         assert anonymous.post("/api/auth/login",json={"username":username,"password":"WrongPassword"}).status_code==401
         response=anonymous.post("/api/auth/login",json={"username":username,"password":password})
@@ -100,8 +102,8 @@ def test_real_account_session_and_logout(client):
             db.execute(delete(User).where(User.id==user_id))
 
 def test_visual_api_extracts_variable_into_headers(tmp_path,monkeypatch):
-    from aiqa.runners import steps as runtime
-    from aiqa.steps import validate_steps
+    from testpilot.runners import steps as runtime
+    from testpilot.steps import validate_steps
     seen=[]
     def target(request):
         seen.append(request)
@@ -123,7 +125,7 @@ def test_visual_api_extracts_variable_into_headers(tmp_path,monkeypatch):
     assert len(seen)==2
 
 def test_visual_failure_has_step_and_does_not_continue(tmp_path,monkeypatch):
-    from aiqa.runners import steps as runtime
+    from testpilot.runners import steps as runtime
     original=httpx.Client;seen=[]
     def target(request):
         seen.append(request);return httpx.Response(200,json={"status":"OK"})
@@ -147,7 +149,7 @@ def test_visual_compiles_to_native_assets(kind,steps):
     else:compile(code,"test_case.py","exec")
 
 def test_bad_step_and_missing_variable_are_rejected():
-    from aiqa.runners.steps import substitute,json_value
+    from testpilot.runners.steps import substitute,json_value
     with pytest.raises(ValueError):validate_steps("api",[{"action":"click","selector":"foo"}])
     with pytest.raises(ValueError):substitute("Bearer {{missing}}",{})
     assert json_value({"data":{"users":[{"id":1}]}},"$.data.users[0].id")==1
@@ -174,7 +176,8 @@ def test_stop_suppresses_old_pending_messages_but_allows_new_followup(client,pro
     identity=uid("TASK")
     with project_scope(projects[0]),session() as db:
         db.add(Record(id=identity,kind="task",status="running",payload=dict(id=identity,status="running",messages=[dict(id="old",role="user",content="执行测试",delivered=False)],events=[],runIds=[],caseIds=[],goal="原任务",createdAt=t.stamp())))
-        db.add(Job(id=uid("JOB"),kind="agent",record_id=identity,status="running",claim="test",lease=now()+timedelta(hours=1)))
+        enqueue(db,db.get(Record,identity),"agent")
+    mark_running(identity)
     with project_scope(projects[0]):
         t.task_cancel(identity)
         t.task_message(identity,"解释一下，别再执行")
@@ -185,7 +188,7 @@ def test_stop_suppresses_old_pending_messages_but_allows_new_followup(client,pro
 
 
 def test_optional_http_status_on_request_is_actually_asserted(tmp_path,monkeypatch):
-    from aiqa.runners import steps as runtime
+    from testpilot.runners import steps as runtime
     original=httpx.Client
     monkeypatch.setattr(runtime.httpx,"Client",lambda **kwargs:original(transport=httpx.MockTransport(lambda req:httpx.Response(401,json={})),**kwargs))
     monkeypatch.setattr(runtime,"Path",lambda value:tmp_path/"steps.json")
